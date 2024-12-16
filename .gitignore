@@ -67,3 +67,5 @@ sengoku/example_win32_opengl3/Debug/vc143.idb
 sengoku/example_win32_opengl3/Debug/example_win32_opengl3.vcxproj.FileListAbsolute.txt
 
 *.lastbuildstate
+
+*.idb

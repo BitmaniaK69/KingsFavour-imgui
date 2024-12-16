@@ -88,6 +88,11 @@ struct Player {
     std::vector<Card> hand; // Cards in hand
     std::vector<Card> wonCards; // Cards won by the player
 
+    //stats
+    int lastScore = 0;
+    int goodPoints = 0;
+    int negativePoints = 0;
+    int parliaments = 0;
 };
 
 using playedCardsType = std::vector<std::pair<std::string, Card>>;
@@ -155,6 +160,26 @@ void RenderBackgroundWithAspectRatio(GLuint textureID, int imgWidth, int imgHeig
 }
 //------------------------------------------------------------------------------------
 
+std::string iconify(const std::string& name) {
+    static std::map<std::string, std::string> suitsSymbols = {
+        {"Crowns", ICON_FA_CROWN},
+        {"Weapons", ICON_FA_TROWEL},
+        {"Faith", ICON_FA_CROSS},
+        {"Diamonds", ICON_FA_GEM},
+        {"Betrays", ICON_FA_DRAGON},
+        {"Guards", ICON_FA_SHIELD_HALVED},
+        {"Parliament", ICON_FA_BUILDING_COLUMNS}
+    };
+
+    auto it = suitsSymbols.find(name);
+    if (it != suitsSymbols.end()) {
+        return it->second;
+    }
+    else {
+        return "";
+    }
+}
+
 // Functions for initializing, shuffling, and dealing the deck
 std::vector<Card> initializeDeck();
 
@@ -174,12 +199,7 @@ void playerRandomSwap(std::vector<Player>& players, int& coinsInTreasury);
 void simulateTurn(int turn, int& coinsInTreasury, std::vector<Player>& players, std::vector<Card>& deck);
 
 // UI Rendering Functions (using Dear ImGui as an example)
-bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer);
-
-// Function to render the main game panel
-void renderGamePanel2(const playedCardsType& playedCards);
-
-
+bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow);
 
 // Helper function to get the color corresponding to the suit (For UI)
 ImVec4 getSuitColor(const std::string& suit);
@@ -187,13 +207,12 @@ ImVec4 getSuitColor(const std::string& suit);
 // Function to determine the winner of the hand and update the winner hand, managing also special cases (Parliament, guard)
 bool determineWinnerAndResetHand(playedCardsType& playedCards, std::vector<Player>& players, int& coinsInTreasury, bool isLastHand, Player& winner);
 
+void CalculateScore(playedCardsType& playedCards, Player& winner);
+
 // Function to determine the winner and update the winner hand - Previous version
 bool determineWinnerAndResetHand2(playedCardsType& playedCards, std::vector<Player>& players, int& coinsInTreasury, bool isLastHand, Player& winner);
 
-void dealNewCards(std::vector<Player>& players);
-
-//------------------------------------------------------------------------------------
-void renderPlayerPanel2(Player& player);
+void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck);
 
 //------------------------------------------------------------------------------------
 
@@ -216,10 +235,11 @@ void renderGamePanel(const playedCardsType& playedCards) {
 
     for (const auto& [playerName, card] : playedCards) {
         ImGui::PushStyleColor(ImGuiCol_Text, getSuitColor(card.suit)); // Color based on the suit
-        ImGui::Text("%s played %s of %s (%+d points)",
+        ImGui::Text("%s played %s of %s %s  (%+d points)",
             playerName.c_str(),
             card.value.c_str(),
             card.suit.c_str(),
+            iconify(card.suit).c_str(),
             card.pointValue); // Card value, suit, and point value
         ImGui::PopStyleColor();
     }
@@ -306,6 +326,9 @@ int main() {
     Player winner;
     bool withWinner = false;
     bool isLastHand = false;
+    bool isLastRound = false;
+    bool isGameOver = false;
+
 
     std::string currentPlayer = players[0].name; // Initialize with the first player
     int currentPlayerIndex = 0; // Track the index of the current player
@@ -345,108 +368,122 @@ int main() {
 
         // Main loop
         {
-            // Render player panels
-            for (auto& player : players) {
-                if (renderPlayerPanel(player, playedCards, currentPlayer)) {
-                    // Check if the current player has played their card
-                    auto it = std::find_if(playedCards.begin(), playedCards.end(),
-                        [&](const std::pair<std::string, Card>& entry) {
-                            return entry.first == currentPlayer;
-                        });
+                // Render player panels
+                for (auto& player : players) {
+                    if (renderPlayerPanel(player, playedCards, currentPlayer, handCompleted)) {
 
-                    if (it != playedCards.end()) {
-                        // Move to the next player
-                        currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
-                        currentPlayer = players[currentPlayerIndex].name;
+                        // Check if the current player has played their card
+                        auto it = std::find_if(playedCards.begin(), playedCards.end(),
+                            [&](const std::pair<std::string, Card>& entry) {
+                                return entry.first == currentPlayer;
+                            });
+
+                        if (it != playedCards.end()) {
+                            // Move to the next player
+                            currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
+                            currentPlayer = players[currentPlayerIndex].name;
+                        }
                     }
-                }
             }
-
 
             renderGamePanel(playedCards);
-
-            // Check if all players have played their cards
-            if (playedCards.size() == players.size()) {
-                // Determine the winner and reset for the next hand
-                if (!handCompleted) {
-                    // Determine if this is the last hand of the turn
-                    isLastHand = (++handCount % 4 == 0); // Every 4 hands mark the end of a turn
-
-                    if (!withWinner) {
-                        if (determineWinnerAndResetHand(playedCards, players, coinsInTreasury, isLastHand, winner))
-                        {
-                            auto& winningPlayer = *std::find_if(players.begin(), players.end(),
-                                [&](const Player& p) { return p.name == winner.name; });
-
-                            // Add the played cards to the winner's wonCards
-                            for (const auto& [_, card] : playedCards) {
-                                winningPlayer.wonCards.push_back(card);
-                                winningPlayer.points += card.pointValue; // Add card points to player's total points
-                            }
-                            // Add coins to the winner (if available)
-                            if (coinsInTreasury > 0) {
-                                winningPlayer.coins++;
-                                coinsInTreasury--;
-                            }
-
-                            std::cout << winner.name << " wins the hand and now has "
-                                << winningPlayer.points << " points and "
-                                << winningPlayer.coins << " coins.\n";
-                            // There is a winner
-                            handCompleted = true;
-                            withWinner = true;
-                        }
-                    }
+            isLastRound = deck.size() <= players.size();
+            if (isGameOver)
+            {
+                ImGui::Begin("Game Panel");
+                ImGui::Text("End of the game!");
+                if (ImGui::Button("Restart"))
+                {
+                    shuffleDeck(deck);
+                    dealNewCards(players, deck);
                 }
-                else if (handCompleted && withWinner) {
-                    ImGui::Begin("Game Panel");
-
-                    if (isLastHand)
-                    {
-                        ImGui::Text("Last hand");
-                        ImGui::Separator();
-                    }
-
-                    ImGui::Text(std::format("{} won the hand!", winner.name).c_str());
-                    if (ImGui::Button("Continue"))
-                    {
-                        // Set the winner as the starting player for the next hand
-                        currentPlayerIndex = getPlayerIndexByName(players, winner.name);
-                        currentPlayer = winner.name;
-                        
-                        // If last hand, winner collects all remaining coins
-                        /*if (isLastHand) {
-                            winner.coins += coinsInTreasury;
-                            coinsInTreasury = 0;
-                            std::cout << winner.name << " collects the remaining treasury coins!\n";
-                        }*/
-                        // If last hand, winner collects all remaining coins
-                        if (isLastHand) {
-                            auto& winningPlayer = *std::find_if(players.begin(), players.end(),
-                                [&](const Player& p) { return p.name == winner.name; });
-
-                            winningPlayer.coins += coinsInTreasury;
-                            coinsInTreasury = 0;
-
-                            std::cout << winner.name << " collects the remaining treasury coins!\n";
-                        }
-                        // Clear playedCards for the next hand
-                        playedCards.clear();
-
-                        // If last hand, deal new cards to all players
-                        if (isLastHand) {
-                            dealNewCards(players);
-                        }
-                        
-                        handCompleted = false;
-                        withWinner = false;
-                        isLastHand = false;
-                    }
-                    ImGui::Separator();
-                    ImGui::End();
-                }
+                ImGui::End();
             }
-        }
+            else {
+                // Check if all players have played their cards
+                if (playedCards.size() == players.size()) {
+                    // Determine the winner and reset for the next hand
+                    if (!handCompleted) {
+                        // Determine if this is the last hand of the turn
+                        isLastHand = (++handCount % 4 == 0); // Every 4 hands mark the end of a turn
+                        if (!withWinner) {
+                            if (determineWinnerAndResetHand(playedCards, players, coinsInTreasury, isLastHand, winner))
+                            {
+                                auto& winningPlayer = *std::find_if(players.begin(), players.end(),
+                                    [&](const Player& p) { return p.name == winner.name; });
+                              
+                                winningPlayer.wonCards = winner.wonCards;
+                                CalculateScore(playedCards, winningPlayer);
+                                /*winningPlayer.points = winner.points; // Add card points to player's total points
+                                winningPlayer.lastScore = winner.lastScore; // Add card points to player's total points*/
+
+                                // Add coins to the winner (if available)
+                                if (coinsInTreasury > 0) {
+                                    winningPlayer.coins++;
+                                    coinsInTreasury--;
+                                }
+
+                                std::cout << winner.name << " wins the hand and now has "
+                                    << winningPlayer.points << " points and "
+                                    << winningPlayer.coins << " coins.\n";
+                                // There is a winner
+                                handCompleted = true;
+                                withWinner = true;
+                            }
+                        }
+                    }
+                    else if (handCompleted && withWinner) {
+                        ImGui::Begin("Game Panel");
+
+                        if (isLastHand)
+                        {
+                            ImGui::Text("Last hand");
+                            ImGui::Separator();
+                        }
+
+                        ImGui::Text(std::format("{} won the hand!", winner.name).c_str());
+                        if (ImGui::Button("Continue"))
+                        {
+                            // Set the winner as the starting player for the next hand
+                            currentPlayerIndex = getPlayerIndexByName(players, winner.name);
+                            currentPlayer = winner.name;
+
+                            // If last hand, winner collects all remaining coins
+                            if (isLastRound) {
+                                auto& winningPlayer = *std::find_if(players.begin(), players.end(),
+                                    [&](const Player& p) { return p.name == winner.name; });
+
+                                winningPlayer.coins += coinsInTreasury;
+                                std::cout << winner.name << " collects the remaining treasury coins!\n";
+                                ImGui::Text(std::format("{} collected {} remaining treasury coins!", winner.name, coinsInTreasury).c_str());
+                                coinsInTreasury = 0;
+                            }
+                            // Clear playedCards for the next hand
+                            playedCards.clear();
+
+                            // If last hand, deal new cards to all players
+                            if (isLastHand) {
+                                if (!isLastRound)
+                                {
+                                    dealNewCards(players, deck);
+                                }
+                                else
+                                {
+                                    isGameOver = true;
+                                }
+                            }
+
+                            handCompleted = false;
+                            withWinner = false;
+                            isLastHand = false;
+                        }
+                        ImGui::Separator();
+                        ImGui::End();
+                    }
+                }
+
+            }
+}
     
 
         // Determine winner of the hand
@@ -746,14 +783,13 @@ void simulateTurn(int turn, int& coinsInTreasury, std::vector<Player>& players, 
     std::cout << "  " << players[0].name << " receives an additional mission!\n\n";
 }
 
-void dealNewCards(std::vector<Player>& players)
+void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck)
 {
     std::cout << "Dealing new cards for the next round...\n";
-    std::vector<Card> deck = initializeDeck();
-    shuffleDeck(deck);
-    for (auto& player : players) {
+     for (auto& player : players) {
         player.hand.clear();
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 4; ++i) // Cards in hand = 4
+        {
             if (!deck.empty()) {
                 player.hand.push_back(deck.back());
                 deck.pop_back();
@@ -761,163 +797,43 @@ void dealNewCards(std::vector<Player>& players)
         }
     }
 }
-/*
-// Function to render a single player's panel
-void renderPlayerPanel(Player& player) {
-    ImGui::Begin(("Player " + player.name).c_str());
-    ImGui::Text("Coins: %d", player.coins);
-    ImGui::Text("Points: %d", player.points);
-    ImGui::Text("Missions: %d", player.missions);
-
-    // Display player's cards as buttons for actions
-    for (size_t i = 0; i < player.hand.size(); ++i) {
-        ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.hand[i].suit));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, getSuitColor(player.hand[i].suit));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, getSuitColor(player.hand[i].suit));
-
-        if (ImGui::Button(("Play " + player.hand[i].value + " of " + player.hand[i].suit + "##" + std::to_string(i)).c_str(), ImVec2(200, 40))) {
-            // Handle logic for playing the card
-            std::cout << "Player " << player.name << " played " << player.hand[i].value << " of " << player.hand[i].suit << "\n";
-        }
-
-        ImGui::PopStyleColor(3);
-    }
-
-    ImGui::End();
-}*/
-/*
-void renderPlayerPanel(Player& player, playedCardsType& playedCards) {
-    ImGui::Begin(("Player " + player.name).c_str());
-    ImGui::Text("Coins: %d", player.coins);
-    ImGui::Text("Points: %d", player.points);
-    ImGui::Text("Missions: %d", player.missions);
-
-    // Display player's cards as buttons for actions
-    for (size_t i = 0; i < player.hand.size(); ++i) {
-
-        ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.hand[i].suit));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, getSuitColor(player.hand[i].suit));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, getSuitColor(player.hand[i].suit));
-
-        std::string buttonText = std::format("Play\n{} of {}\n({}{})",
-            player.hand[i].value,
-            player.hand[i].suit,
-            player.hand[i].pointValue >= 0 ? "+" : "",
-            player.hand[i].pointValue);
-
-        if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(100, 80))) {
-            // Add the selected card to playedCards
-            playedCards[player.name] = player.hand[i];
-
-            // Remove the card from the player's hand
-            player.hand.erase(player.hand.begin() + i);
-
-            std::cout << "Player " << player.name << " played " << playedCards[player.name].value << " of " << playedCards[player.name].suit << "\n";
-
-            // Break to avoid accessing an invalid index after removing the card
-            //ImGui::PopStyleColor(3);
-           // ImGui::PopItemWidth();
-           // break;
-        }
-
-        ImGui::PopStyleColor(3);
-        ImGui::SameLine();
-    }
-
-    ImGui::End();
-}*/
-
-bool renderPlayerPanelOld(Player& player, playedCardsType& playedCards, const std::string& currentPlayer) {
-    ImGui::Begin(("Player " + player.name).c_str());
-    ImGui::Text("Coins: %d", player.coins);
-    ImGui::Text("Points: %d", player.points);
-    ImGui::Text("Missions: %d", player.missions);
-    bool played = false;
-    bool isActivePlayer = (player.name == currentPlayer); // Check if it's this player's turn
-
-    for (size_t i = 0; i < player.hand.size(); ++i) {
-        if (isActivePlayer) {
-            // Active player's cards are interactable
-            ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.hand[i].suit));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, getSuitColor(player.hand[i].suit));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, getSuitColor(player.hand[i].suit));
-            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32_WHITE);
-        }
-        else {
-            ImVec4 transparent = getSuitColor(player.hand[i].suit);
-            transparent.w = 0.5f;
-            // Inactive player's cards are semi-transparent
-            ImGui::PushStyleColor(ImGuiCol_Button, transparent); // Dimmed color
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, transparent);
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, transparent);
-            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 128));
-        }
-
-        std::string buttonText = std::format("Play\n{} of {}\n({}{})",
-            player.hand[i].value,
-            player.hand[i].suit,
-            player.hand[i].pointValue >= 0 ? "+" : "",
-            player.hand[i].pointValue);
-
-        // Only allow the active player to click their cards
-        if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(100, 80))) {
-            // Add the selected card to playedCards
-            playedCards.push_back({ player.name, player.hand[i] });
-
-            // Remove the card from the player's hand
-            player.hand.erase(player.hand.begin() + i);
-
-            std::cout << "Player " << player.name << " played " << playedCards.back().second.value
-                << " of " << playedCards.back().second.suit << "\n";
-            ImGui::PopStyleColor(4);
-            break;
-            break; // Ensure only one card is played per turn
-        }
-
-
-
-        /*if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(100, 80))) {
-            // Add the selected card to playedCards
-            playedCards[player.name] = player.hand[i];
-
-            // Remove the card from the player's hand
-            player.hand.erase(player.hand.begin() + i);
-
-            std::cout << "Player " << player.name << " played " << playedCards[player.name].value << " of " << playedCards[player.name].suit << "\n";
-            played = true;
-            // Break to avoid accessing an invalid index after removing the card
-            ImGui::PopStyleColor(4);
-            break;
-        }*/
-
-        ImGui::PopStyleColor(4);
-        ImGui::SameLine();
-    }
-
-    ImGui::End();
-    return played;
-}
-
-//new
-bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer) {
-    ImGui::Begin(("Player " + player.name).c_str());
-    ImGui::Text("Coins: %d", player.coins);
-    ImGui::Text("Points: %d", player.points);
-    ImGui::Text("Missions: %d", player.missions);
-    bool played = false;
+bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow) {
     // Check if it's the current player's turn
     bool isCurrentPlayer = (player.name == currentPlayer);
-    if (isCurrentPlayer)
-    {
+
+    // Minimize the window for non-current players
+  /*  if (!isCurrentPlayer) {
+        ImGui::SetNextWindowCollapsed(true, ImGuiCond_Always);
+    }
+    else {
+        ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
+    }*/
+
+    ImGui::Begin(("Player " + player.name).c_str());
+
+    ImGui::Text("Coins: %d", player.coins);
+    ImGui::Text("Points: %d(%+d)", player.points, player.points - player.lastScore);
+    ImGui::SameLine();  ImGui::Text(std::format("    {}:{} {}:{} {}:{}", ICON_FA_BUILDING_COLUMNS, player.parliaments, ICON_FA_CIRCLE_PLUS, player.goodPoints, ICON_FA_CIRCLE_MINUS, player.negativePoints).c_str());
+    ImGui::Text("Missions: %d", player.missions);
+    bool played = false;
+
+    if (isCurrentPlayer) {
         ImGui::Separator();
         ImGui::Text("*** Playing ***");
         ImGui::Separator();
     }
+
     // Display player's cards as buttons for actions
-    for (size_t i = 0; i < player.hand.size(); ++i) {
-        // Dim the button if it's not the player's turn
-        if (isCurrentPlayer) {
-         
+    for (size_t i = 0; i < player.hand.size(); ++i)
+    {
+        std::string buttonText = std::format("Play {} {}\nof {}\n({}{})",
+            player.hand[i].value,
+            iconify(player.hand[i].suit),
+            player.hand[i].suit,
+            player.hand[i].pointValue >= 0 ? "+" : "",
+            player.hand[i].pointValue);
+
+        if (isCurrentPlayer && !justShow) {
             // Active player's cards are interactable
             ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.hand[i].suit));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, getSuitColor(player.hand[i].suit));
@@ -925,24 +841,20 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32_WHITE);
         }
         else {
+            // Dim cards for non-current players
             ImVec4 transparent = getSuitColor(player.hand[i].suit);
-            transparent.w = 0.5f;
-            // Inactive player's cards are semi-transparent
-            ImGui::PushStyleColor(ImGuiCol_Button, transparent); // Dimmed color
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, transparent);
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, transparent);
-            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 255, 255, 128));
+            transparent.w = 0.4f;
+            auto invisible = IM_COL32(255, 255, 255, 16);
+            ImGui::PushStyleColor(ImGuiCol_Button, invisible);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, invisible);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, invisible);
+            ImGui::PushStyleColor(ImGuiCol_Text, invisible);
+            buttonText = "";
         }
 
-        std::string buttonText = std::format("Play\n{} of {}\n({}{})",
-            player.hand[i].value,
-            player.hand[i].suit,
-            player.hand[i].pointValue >= 0 ? "+" : "",
-            player.hand[i].pointValue);
-
-
+       
         if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(100, 80))) {
-            if (isCurrentPlayer) {
+            if (isCurrentPlayer && !justShow) {
                 // Add the selected card to playedCards
                 playedCards.push_back({ player.name, player.hand[i] });
 
@@ -963,6 +875,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
     ImGui::End();
     return played;
 }
+
 
 
 // Function to render the main game panel
@@ -1062,14 +975,47 @@ bool determineWinnerAndResetHand(
 
         for (const auto& [_, card] : playedCards) {
             winner.wonCards.push_back(card);
-
-            winner.points += card.pointValue;
         }
-
         return true;
     }
 
     return false; // No winner
+}
+
+void CalculateScore(playedCardsType& playedCards, Player& player)
+{
+    player.lastScore = player.points;
+    player.points = 0;
+    player.goodPoints = 0;
+    player.negativePoints = 0;
+    player.parliaments = 0;
+    int parliamentCount = 0;
+   
+    for (auto card : player.wonCards)
+    {
+        if (card.suit != "Parliament")
+        {
+            player.points += card.pointValue;
+            if (card.pointValue>0) player.goodPoints+= card.pointValue;
+            else if (card.pointValue < 0) player.negativePoints+= card.pointValue;
+        }
+        else
+        {
+            parliamentCount++;
+            
+        }
+    }
+    if ((parliamentCount % 2) == 1)
+    {
+        player.points -= -1;
+        player.parliaments=-1;
+    }
+    else if (parliamentCount > 1)
+    {
+        player.points += 3;
+        player.parliaments = 3;
+    }
+
 }
 
 bool determineWinnerAndResetHand2(
@@ -1130,4 +1076,3 @@ ImVec4 getSuitColor(const std::string& suit) {
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // Default White
 }
 
-void dealNewCards(std::vector<Player>& players);

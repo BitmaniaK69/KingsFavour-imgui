@@ -20,6 +20,9 @@
     <Filter Include="httplib">
       <UniqueIdentifier>{d5fc3e25-3306-4139-8af2-b4391025cc25}</UniqueIdentifier>
     </Filter>
+    <Filter Include="text_formatted">
+      <UniqueIdentifier>{bd006440-cfe8-40bc-bf13-55c21d134887}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -104,6 +107,9 @@
     </ClInclude>
     <ClInclude Include="..\..\httplib\httplib.h">
       <Filter>httplib</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\textformatted\text_formatted.h">
+      <Filter>text_formatted</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

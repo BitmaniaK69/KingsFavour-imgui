@@ -15,6 +15,9 @@
 
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_win32.h"
+
+#include "text_formatted.h"
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -94,7 +97,7 @@ struct Player {
     int goodPoints = 0;
     int negativePoints = 0;
     int parliaments = 0;
-    bool swappedThisTurn = false;
+    int swappedThisTurn = 0;
 };
 
 using playedCardsType = std::vector<std::pair<std::string, Card>>;
@@ -232,7 +235,8 @@ int getNextPlayerIndex(int currentPlayerIndex, int totalPlayers) {
 }
 void renderGamePanel(const playedCardsType& playedCards) {
     ImGui::Begin("Game Panel");
-
+    //TextFormatted("{h1}Titolo Principale{h0}\n{h2}Sottotitolo{h0}\nTesto normale {FF0000}rosso{h2} e poi di nuovo sottotitolo{0000FF}blu{h0} e poi normale");
+   // TextFormatted("Testo normale {FF0000}rosso{FFFFFF} e poi normale");
     ImGui::Text("Cards Played This Turn:");
     ImGui::Separator();
 
@@ -243,7 +247,15 @@ void renderGamePanel(const playedCardsType& playedCards) {
             card.value.c_str(),
             card.suit.c_str(),
             iconify(card.suit).c_str(),
-            card.pointValue); // Card value, suit, and point value
+            card.pointValue); // Card value, suit, and point value*/
+
+       /* TextFormatted("%s played {h1}%s{h0} of %s {h1}%s{h0}  (%+d points)",
+            playerName.c_str(),
+            card.value.c_str(),
+            card.suit.c_str(),
+            iconify(card.suit).c_str(),
+            card.pointValue);*/
+
         ImGui::PopStyleColor();
     }
 
@@ -840,17 +852,6 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
 
     // Display player's hand
     for (size_t i = 0; i < player.hand.size(); ++i) {
-        if (isCurrentPlayer && !justShow) {
-            ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.hand[i].suit));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, getSuitColor(player.hand[i].suit));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, getSuitColor(player.hand[i].suit));
-        }
-        else {
-            ImVec4 transparent = getSuitColor(player.hand[i].suit); transparent.w = 0.4f;
-            ImGui::PushStyleColor(ImGuiCol_Button, invisible);
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, invisible);
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, invisible);
-        }
 
         std::string buttonText = std::format("Play {} {}\nof {}\n({}{})",
             player.hand[i].value,
@@ -858,6 +859,23 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             player.hand[i].suit,
             player.hand[i].pointValue >= 0 ? "+" : "",
             player.hand[i].pointValue);
+
+        if (isCurrentPlayer && !justShow) {
+            ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.hand[i].suit));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, getSuitColor(player.hand[i].suit));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, getSuitColor(player.hand[i].suit));
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32_WHITE);
+        }
+        else {
+            ImVec4 transparent = getSuitColor(player.hand[i].suit); transparent.w = 0.4f;
+            ImGui::PushStyleColor(ImGuiCol_Button, invisible);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, invisible);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, invisible);
+            ImGui::PushStyleColor(ImGuiCol_Text, invisible);
+            buttonText = "Hidden Card";
+        }
+
+      
 
         if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(100, 80))) {
             if (isCurrentPlayer && !justShow) {
@@ -869,7 +887,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             }
         }
         
-        ImGui::PopStyleColor(3);
+        ImGui::PopStyleColor(4);
         if (i < player.hand.size() - 1) {
             ImGui::SameLine();
         }
@@ -886,7 +904,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                 player.coins--; // Deduct a coin for the swap
                 coinsInTreasury++;
 
-                player.swappedThisTurn = true;
+                player.swappedThisTurn = i+1;
                 
                 std::cout << "Player " << player.name << " swapped hand card " << player.hand[i].value
                     << " with their swap card " << player.swapCard.value << "\n";
@@ -902,13 +920,46 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
     }
     ImGui::Separator();
 
-    // Show player's swap card
     ImGui::Text("Swap Card:");
-    ImGui::PushStyleColor(ImGuiCol_Button, invisible);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, invisible);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, invisible);
-    ImGui::Button(("Hidden Card##swapCard_" + player.name).c_str(), ImVec2(100, 80));
-    ImGui::PopStyleColor(3);
+    if (isCurrentPlayer && player.swappedThisTurn) {
+        ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.swapCard.suit));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, getSuitColor(player.swapCard.suit));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, getSuitColor(player.swapCard.suit));
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32_WHITE);
+    }
+    else {
+        ImVec4 transparent = getSuitColor(player.swapCard.suit); transparent.w = 0.4f;
+        ImGui::PushStyleColor(ImGuiCol_Button, invisible);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, invisible);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, invisible);
+        ImGui::PushStyleColor(ImGuiCol_Text, invisible);
+    }
+    // Show player's swap card
+    std::string hiddenText = "Hidden Card";
+    if (isCurrentPlayer && player.swappedThisTurn)
+    {
+        hiddenText = std::format("Play {} {}\nof {}\n({}{})",
+            player.swapCard.value,
+            iconify(player.swapCard.suit),
+            player.swapCard.suit,
+            player.swapCard.pointValue >= 0 ? "+" : "",
+            player.swapCard.pointValue);
+    }
+
+    if (ImGui::Button((hiddenText +"##swapCard_" + player.name).c_str(), ImVec2(100, 80)))
+    {
+        if (isCurrentPlayer && player.swappedThisTurn)
+        {
+            
+            playedCards.push_back({ player.name, player.swapCard });
+            std::swap(player.hand[player.swappedThisTurn - 1], player.swapCard);
+            player.hand.erase(player.hand.begin() + (player.swappedThisTurn-1));
+            std::cout << "Player " << player.name << " played " << playedCards.back().second.value
+                << " of " << playedCards.back().second.suit << "\n";
+            played = true;
+        }
+    }
+    ImGui::PopStyleColor(4);
 
     // Swap with another player's swapCard
     if (isCurrentPlayer && !justShow && !player.swappedThisTurn && player.coins > 0) {

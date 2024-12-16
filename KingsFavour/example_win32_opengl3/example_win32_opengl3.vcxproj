@@ -100,7 +100,7 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>C:\Program Files\OpenSSL-Win64\include;..\..\httplib;..\..\nlohmann_json;..\..\stb;..\..\implot;..\..\imgui;..\..;..\..\backends</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Program Files\OpenSSL-Win64\include;..\..\text_formatted;..\..\httplib;..\..\nlohmann_json;..\..\stb;..\..\implot;..\..\imgui;..\..;..\..\backends</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
@@ -180,6 +180,7 @@
     <ClInclude Include="..\..\implot\implot_internal.h" />
     <ClInclude Include="..\..\nlohmann_json\json.hpp" />
     <ClInclude Include="..\..\stb\stb_image.h" />
+    <ClInclude Include="..\..\textformatted\text_formatted.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\misc\natvis\imgui.natvis" />

@@ -1,2 +1,0 @@
-E:\Projects\Sengoku-Imgui\sengoku\example_win32_opengl3\Debug\example_win32_opengl3.exe
-E:\Projects\KingsFavour-imgui\KingsFavour\example_win32_opengl3\Debug\example_win32_opengl3.exe

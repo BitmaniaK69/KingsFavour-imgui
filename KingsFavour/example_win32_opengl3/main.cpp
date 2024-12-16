@@ -94,6 +94,66 @@ using playedCardsType = std::vector<std::pair<std::string, Card>>;
 
 //------------------------------------------------------------------------------------
 
+//--------------------------------------------------------------------------------------
+
+GLuint LoadTexture(const char* filename, int& width, int& height) {
+    int channels;
+    unsigned char* data = stbi_load(filename, &width, &height, &channels, 4); // Load as RGBA
+
+    if (!data) {
+        std::cerr << "Failed to load image: " << filename << std::endl;
+        return 0;
+    }
+
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    stbi_image_free(data);  // Free the image memory
+    return textureID;
+}
+
+
+void RenderBackgroundWithAspectRatio(GLuint textureID, int imgWidth, int imgHeight) {
+
+    ImVec2 windowPos = ImGui::GetMainViewport()->Pos;  // Position of the main viewport
+    ImVec2 windowSize = ImGui::GetMainViewport()->Size; // Size of the window
+
+    // Calculate the scaling factor to maintain aspect ratio
+    float windowAspect = windowSize.x / windowSize.y;
+    float imageAspect = (float)imgWidth / (float)imgHeight;
+
+    float scaleX = windowSize.x;
+    float scaleY = windowSize.y;
+
+    // Scale the image to fit the window while maintaining aspect ratio
+    if (imageAspect > windowAspect) {
+        // Image is wider than the window: scale based on width
+        scaleY = windowSize.x / imageAspect;
+    }
+    else {
+        // Image is taller than the window: scale based on height
+        scaleX = windowSize.y * imageAspect;
+    }
+
+    // Calculate the position for centering the image
+    ImVec2 imagePos = ImVec2(windowPos.x + (windowSize.x - scaleX) * 0.5f, windowPos.y + (windowSize.y - scaleY) * 0.5f);
+
+    // Get the ImDrawList for the background
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+
+    // Draw the image with the calculated size and position
+    drawList->AddImage(
+        (ImTextureID)(intptr_t)textureID,                // Texture ID
+        imagePos,                                       // Top-left position
+        ImVec2(imagePos.x + scaleX, imagePos.y + scaleY) // Bottom-right position
+    );
+}
+//------------------------------------------------------------------------------------
 
 // Functions for initializing, shuffling, and dealing the deck
 std::vector<Card> initializeDeck();
@@ -250,6 +310,10 @@ int main() {
     std::string currentPlayer = players[0].name; // Initialize with the first player
     int currentPlayerIndex = 0; // Track the index of the current player
 
+    int imgWidth = 2010;
+    int imgHeight = 1080;
+    GLuint backgroundTexture;
+    backgroundTexture = LoadTexture("background3.png", imgWidth, imgHeight);  // Carica l'immagine
 
     while (!done)
     {
@@ -274,6 +338,10 @@ int main() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+
+        if (backgroundTexture != 0) {
+            RenderBackgroundWithAspectRatio(backgroundTexture, imgWidth, imgHeight);  // Disegna l'immagine come sfondo
+        }
 
         // Main loop
         {
@@ -307,6 +375,23 @@ int main() {
                     if (!withWinner) {
                         if (determineWinnerAndResetHand(playedCards, players, coinsInTreasury, isLastHand, winner))
                         {
+                            auto& winningPlayer = *std::find_if(players.begin(), players.end(),
+                                [&](const Player& p) { return p.name == winner.name; });
+
+                            // Add the played cards to the winner's wonCards
+                            for (const auto& [_, card] : playedCards) {
+                                winningPlayer.wonCards.push_back(card);
+                                winningPlayer.points += card.pointValue; // Add card points to player's total points
+                            }
+                            // Add coins to the winner (if available)
+                            if (coinsInTreasury > 0) {
+                                winningPlayer.coins++;
+                                coinsInTreasury--;
+                            }
+
+                            std::cout << winner.name << " wins the hand and now has "
+                                << winningPlayer.points << " points and "
+                                << winningPlayer.coins << " coins.\n";
                             // There is a winner
                             handCompleted = true;
                             withWinner = true;
@@ -328,14 +413,23 @@ int main() {
                         // Set the winner as the starting player for the next hand
                         currentPlayerIndex = getPlayerIndexByName(players, winner.name);
                         currentPlayer = winner.name;
-
+                        
                         // If last hand, winner collects all remaining coins
-                        if (isLastHand) {
+                        /*if (isLastHand) {
                             winner.coins += coinsInTreasury;
                             coinsInTreasury = 0;
                             std::cout << winner.name << " collects the remaining treasury coins!\n";
-                        }
+                        }*/
+                        // If last hand, winner collects all remaining coins
+                        if (isLastHand) {
+                            auto& winningPlayer = *std::find_if(players.begin(), players.end(),
+                                [&](const Player& p) { return p.name == winner.name; });
 
+                            winningPlayer.coins += coinsInTreasury;
+                            coinsInTreasury = 0;
+
+                            std::cout << winner.name << " collects the remaining treasury coins!\n";
+                        }
                         // Clear playedCards for the next hand
                         playedCards.clear();
 
@@ -343,7 +437,7 @@ int main() {
                         if (isLastHand) {
                             dealNewCards(players);
                         }
-
+                        
                         handCompleted = false;
                         withWinner = false;
                         isLastHand = false;
@@ -900,7 +994,15 @@ bool determineWinnerAndResetHand(
     Player& winner) {
 
     // Determine the suit to follow (first card's suit)
-    std::string suitToFollow = playedCards.begin()->second.suit;
+    std:string suitToFollow;
+    for (auto card : playedCards)
+    {
+        if (card.second.suit != "Guard" && card.second.suit != "Betrays")
+        {
+            suitToFollow = card.second.suit;
+            break;
+        }
+    }
 
     // Variables to track the winner
     std::string winnerName;
@@ -960,6 +1062,8 @@ bool determineWinnerAndResetHand(
 
         for (const auto& [_, card] : playedCards) {
             winner.wonCards.push_back(card);
+
+            winner.points += card.pointValue;
         }
 
         return true;

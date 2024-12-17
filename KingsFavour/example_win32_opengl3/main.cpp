@@ -21,6 +21,8 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#define NOMINMAX
+
 #include <windows.h>
 #include <GL/GL.h>
 #include <tchar.h>
@@ -45,6 +47,8 @@
 #include <random>
 #include <ctime>
 #include <utility>
+#include <limits>
+#include <cstdint> // uint_fast8_t
 
 // ImGui and GLFW
 //#include "imgui_impl_glfw.h"
@@ -103,7 +107,12 @@ struct Player {
 using playedCardsType = std::vector<std::pair<std::string, Card>>;
 
 //------------------------------------------------------------------------------------
+static thread_local std::mt19937 rng(std::random_device{}());
+static thread_local std::uniform_int_distribution<int> dist(1, 100);
 
+inline bool chance(uint_fast8_t percent) noexcept {
+    return dist(rng) <= percent;
+}
 //--------------------------------------------------------------------------------------
 
 GLuint LoadTexture(const char* filename, int& width, int& height) {
@@ -204,7 +213,7 @@ void playerRandomSwap(std::vector<Player>& players, int& coinsInTreasury);
 void simulateTurn(int turn, int& coinsInTreasury, std::vector<Player>& players, std::vector<Card>& deck);
 
 // UI Rendering Functions (using Dear ImGui as an example)
-bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow, std::vector<Player>& allPlayers,int& coinsInTreasury);
+bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow,bool& automove, std::vector<Player>& allPlayers, int& coinsInTreasury, const std::string& suitToFollow, bool handCompleted);
 bool renderPlayerPanel2(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow);
 
 // Helper function to get the color corresponding to the suit (For UI)
@@ -233,7 +242,7 @@ int getPlayerIndexByName(const std::vector<Player>& players, const std::string& 
 int getNextPlayerIndex(int currentPlayerIndex, int totalPlayers) {
     return (currentPlayerIndex + 1) % totalPlayers; // Circular turn order
 }
-void renderGamePanel(const playedCardsType& playedCards) {
+void renderGamePanel(const playedCardsType& playedCards, bool& automove, bool handCompleted) {
     ImGui::Begin("Game Panel");
     //TextFormatted("{h1}Titolo Principale{h0}\n{h2}Sottotitolo{h0}\nTesto normale {FF0000}rosso{h2} e poi di nuovo sottotitolo{0000FF}blu{h0} e poi normale");
    // TextFormatted("Testo normale {FF0000}rosso{FFFFFF} e poi normale");
@@ -258,7 +267,10 @@ void renderGamePanel(const playedCardsType& playedCards) {
 
         ImGui::PopStyleColor();
     }
-
+    if (!handCompleted)
+    {
+       ImGui::Checkbox("Auto Move", &automove);
+    }
     ImGui::Separator();
     ImGui::End();
 }
@@ -365,6 +377,7 @@ int main() {
     int imgHeight = 1080;
     GLuint backgroundTexture;
     backgroundTexture = LoadTexture("background3.png", imgWidth, imgHeight);  // Carica l'immagine
+    bool automove = false;
 
     while (!done)
     {
@@ -398,7 +411,12 @@ int main() {
         {
                 // Render player panels
                 for (auto& player : players) {
-                    if (renderPlayerPanel(player, playedCards, currentPlayer, handCompleted, players, coinsInTreasury)) {
+                    std::string suitToFollow;
+                    if (!playedCards.empty()) {
+                        suitToFollow = playedCards[0].second.suit;
+                    }
+
+                    if (renderPlayerPanel(player, playedCards, currentPlayer, handCompleted, automove, players, coinsInTreasury, suitToFollow, handCompleted)) {
 
                         // Check if the current player has played their card
                         auto it = std::find_if(playedCards.begin(), playedCards.end(),
@@ -414,8 +432,9 @@ int main() {
                         player.swappedThisTurn = false;
                     }
             }
-
-            renderGamePanel(playedCards);
+            
+            renderGamePanel(playedCards, automove, handCompleted);
+            
             isLastRound = deck.size() <= players.size();
             if (isGameOver)
             {
@@ -828,10 +847,125 @@ void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck)
 }
 
 
+//--------------------------------------------------------------------------------
+
+Card chooseBestCard(const std::vector<Card>& hand, const std::string& suitToFollow, const playedCardsType& playedCards, Player& player) {
+
+    // Verifica se sono state giocate delle Betrayal
+    if (chance(80))
+    {
+        bool betrayalPlayed = std::any_of(playedCards.begin(), playedCards.end(),
+            [](const std::pair<std::string, Card>& entry) {
+                return entry.second.suit == "Betrays";
+            });
+
+        // Logica 1: Gioca una guardia se ci sono Betrayal in gioco
+        if (betrayalPlayed) {
+            for (const auto& card : hand) {
+                if (card.suit == "Guard") {
+                    return card; // Gioca la guardia per contrastare le Betrayal
+                }
+            }
+        }
+    }
+
+    // Logica 3: Gioca una Betrayal se è più bassa delle altre Betrayal esistenti
+    if (chance(80)) {
+        int lowestBetrayal = INT_MAX;
+        for (const auto& entry : playedCards) {
+            if (entry.second.suit == "Betrays") {
+                lowestBetrayal = std::min(lowestBetrayal, std::stoi(entry.second.value));
+            }
+        }
+        for (const auto& card : hand) {
+            if (card.suit == "Betrays" && std::stoi(card.value) < lowestBetrayal && lowestBetrayal != INT_MAX) {
+                return card; // Gioca una Betrayal se è più bassa
+            }
+        }
+    }
+
+    // Logica 4: Segui il seme, se possibile
+    if (chance(80))
+    {
+        if (suitToFollow != "Parliament" && suitToFollow != "Guard" && suitToFollow != "Betrays") {
+            std::string bestSuit = "0";
+            for (const auto& entry : playedCards)
+            {
+                if (entry.second.suit == suitToFollow && entry.second.value > bestSuit)
+                {
+                    bestSuit = entry.second.value;
+                }
+            }
+            // Logica 4: Segui il seme, se possibile
+            for (const auto& card : hand) {
+                if (card.suit == suitToFollow) {
+                    if (card.value > bestSuit) {
+                        return card;
+                    }
+                }
+            }
+        }
+    }
+
+    // Logica 2: Gioca un Parliament se non si è l'ultimo di mano
+    if (chance(80)) {
+
+        size_t cardsPlayed = playedCards.size();
+        if (cardsPlayed < 3) { // Supponendo che ci siano 4 giocatori
+            for (const auto& card : hand) {
+                if (card.suit == "Parliament") {
+                    return card; // Gioca un Parliament se non sei l'ultimo
+                }
+            }
+        }
+    }
+
+    // Logica 5: Gioca una carta non negativa
+    if (chance(80)) {
+        int minValue = 999;
+        Card selected;
+        for (const auto& card : hand) {
+            if (card.pointValue >= 0 && card.pointValue< minValue) {
+                minValue = card.pointValue;
+                selected = card;
+            }
+        }
+        if (!selected.suit.empty())
+        {
+            return selected;
+        }
+    }
+
+    /*if (chance(20))
+    {
+        if (!player.swappedThisTurn && player.coins > 0) {
+                       
+                // Swap the selected hand card with the swap card
+                std::swap(player.hand[i], player.swapCard);
+                player.coins--; // Deduct a coin for the swap
+                coinsInTreasury++;
+
+                player.swappedThisTurn = i + 1;
+            
+        }
+    }*/
+
+    // Logica 6: Gioca la carta meno penalizzante
+        const Card* leastNegativeCard = &hand.front();
+        for (const auto& card : hand) {
+            if (card.pointValue > leastNegativeCard->pointValue) {
+                leastNegativeCard = &card;
+            }
+        }
+    
+
+    return *leastNegativeCard;
+}
+
 
 //--------------------------------------------------------------------------------
 
-bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow, std::vector<Player>& allPlayers, int& coinsInTreasury) {
+bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow,bool& automove,  std::vector<Player>& allPlayers, int& coinsInTreasury, const std::string& suitToFollow, bool handCompleted) {
 
     ImGui::Begin(("Player " + player.name).c_str());
     ImGui::Text("Coins: %d", player.coins);
@@ -986,6 +1120,35 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
         }
     }
 
+
+    if (isCurrentPlayer && !handCompleted) {
+        ImGui::SameLine();
+        if ( automove || ImGui::Button("Auto Move##auto_move", ImVec2(200, 40))) {
+            if (!player.hand.empty()) {
+                // Scegli la migliore carta da giocare
+                Card bestCard = chooseBestCard(player.hand, suitToFollow, playedCards, player);
+                automove = false;
+                // Aggiungi la carta scelta a playedCards
+                playedCards.push_back({ player.name, bestCard });
+
+                // Rimuovi la carta dalla mano del giocatore
+                auto it = std::find_if(player.hand.begin(), player.hand.end(),
+                    [&bestCard](const Card& card) {
+                        return card.value == bestCard.value && card.suit == bestCard.suit;
+                    });
+                if (it != player.hand.end()) {
+                    player.hand.erase(it);
+                }
+
+                std::cout << "Player " << player.name << " played (Auto) " << bestCard.value
+                    << " of " << bestCard.suit << "\n";
+
+                played = true;
+            }
+        }
+
+    }
+
     ImGui::End();
 
     // Reset swappedThisTurn at the end of the player's turn
@@ -1118,7 +1281,7 @@ bool determineWinnerAndResetHand(
     std:string suitToFollow;
     for (auto card : playedCards)
     {
-        if (card.second.suit != "Guard" && card.second.suit != "Betrays")
+        if (card.second.suit != "Guard" && card.second.suit != "Betrays" && card.second.suit!="Parliament")
         {
             suitToFollow = card.second.suit;
             break;

@@ -49,6 +49,7 @@
 #include <utility>
 #include <limits>
 #include <cstdint> // uint_fast8_t
+#include <iomanip>
 
 // ImGui and GLFW
 //#include "imgui_impl_glfw.h"
@@ -77,6 +78,9 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 //***********************************************
 ImVec4 clear_color = ImVec4(0, 0.0f / 255.0f, 19.0f / 255.0f, 1.00f);
+
+std::mt19937 randomGenerator; // Generatore di numeri casuali
+unsigned int randomSeed = 0; // Seed iniziale
 
 // Card structure to hold card details
 struct Card {
@@ -116,11 +120,11 @@ struct CardValues {
 using playedCardsType = std::vector<std::pair<std::string, Card>>;
 
 //------------------------------------------------------------------------------------
-static thread_local std::mt19937 rng(std::random_device{}());
+//static thread_local std::mt19937 rng(std::random_device{}());
 static thread_local std::uniform_int_distribution<int> dist(1, 100);
 
 inline bool chance(uint_fast8_t percent) noexcept {
-    return dist(rng) <= percent;
+    return dist(randomGenerator) <= percent;
 }
 //--------------------------------------------------------------------------------------
 
@@ -242,10 +246,10 @@ void updatePlayerHandValues(std::vector<Player>& players, const CardValues& card
 void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std::vector<Player>& players);
 void renderCardValueManagementPanel(CardValues& cardValues, const std::string& directoryPath, std::string& selectedFile);
 
+void setRandomSeed(unsigned int seed);
+void renderGamePanel(bool& gameStarted);
 
-
-#include <iomanip>
-#include <ctime>
+//------------------------------------------------------------------------------------
 void ensureDirectoryExists(const std::string& directoryPath) {
     try {
         if (!std::filesystem::exists(directoryPath)) {
@@ -285,59 +289,11 @@ std::vector<std::string> getConfigFiles(const std::string& directoryPath) {
 
 
 //------------------------------------------------------------------------------------
+int getPlayerIndexByName(const std::vector<Player>& players, const std::string& name);
+int getNextPlayerIndex(int currentPlayerIndex, int totalPlayers);
+void renderGameboardPanel(const playedCardsType& playedCards, bool& automove, bool& autoplay, bool handCompleted);
 
-int getPlayerIndexByName(const std::vector<Player>& players, const std::string& name) {
-    for (size_t i = 0; i < players.size(); ++i) {
-        if (players[i].name == name) {
-            return static_cast<int>(i); // Return the index if the name matches
-        }
-    }
-    return -1; // Return -1 if the player is not found
-}
-int getNextPlayerIndex(int currentPlayerIndex, int totalPlayers) {
-    return (currentPlayerIndex + 1) % totalPlayers; // Circular turn order
-}
-void renderGamePanel(const playedCardsType& playedCards, bool& automove, bool& autoplay, bool handCompleted) {
-    ImGui::Begin("Game Panel");
-    //TextFormatted("{h1}Titolo Principale{h0}\n{h2}Sottotitolo{h0}\nTesto normale {FF0000}rosso{h2} e poi di nuovo sottotitolo{0000FF}blu{h0} e poi normale");
-   // TextFormatted("Testo normale {FF0000}rosso{FFFFFF} e poi normale");
-    ImGui::Text("Cards Played This Turn:");
-    ImGui::Separator();
 
-    for (const auto& [playerName, card] : playedCards) {
-        ImGui::PushStyleColor(ImGuiCol_Text, getSuitColor(card.suit)); // Color based on the suit
-        ImGui::Text("%s played %s of %s %s  (%+d points)",
-            playerName.c_str(),
-            card.value.c_str(),
-            card.suit.c_str(),
-            iconify(card.suit).c_str(),
-            card.pointValue); // Card value, suit, and point value*/
-
-        /* TextFormatted("%s played {h1}%s{h0} of %s {h1}%s{h0}  (%+d points)",
-             playerName.c_str(),
-             card.value.c_str(),
-             card.suit.c_str(),
-             iconify(card.suit).c_str(),
-             card.pointValue);*/
-
-        ImGui::PopStyleColor();
-    }
-    if (!handCompleted)
-    {
-        if (ImGui::Button("Auto Move"))
-        {
-            automove = true;
-        };
-        ImGui::SameLine();
-        ImGui::Checkbox("Auto Play", &autoplay);
-        if (autoplay)
-        {
-            automove = true;
-        }
-    }
-    ImGui::Separator();
-    ImGui::End();
-}
 
 //------------------------------------------------------------------------------------
 // MAIN
@@ -454,7 +410,7 @@ int main() {
     backgroundTexture = LoadTexture("background3.png", imgWidth, imgHeight);  // Carica l'immagine
     bool automove = false;
     bool autoplay = false;
-
+    bool gameStarted = false;
     //-------------------------------------------------------------------------------------
 
     while (!done)
@@ -485,7 +441,9 @@ int main() {
             RenderBackgroundWithAspectRatio(backgroundTexture, imgWidth, imgHeight);  // Draw the image as background
         }
         renderValueConfigPanel(cardValues, deck, players);
+        renderGamePanel(gameStarted);
         // Main loop
+        if (gameStarted)
         {
             // Render player panels
             for (auto& player : players) {
@@ -511,12 +469,12 @@ int main() {
                 }
             }
 
-            renderGamePanel(playedCards, automove, autoplay, handCompleted);
+            renderGameboardPanel(playedCards, automove, autoplay, handCompleted);
             renderCardValueManagementPanel(cardValues, "./configs", selectedFile);
             isLastRound = deck.size() <= players.size();
             if (isGameOver)
             {
-                ImGui::Begin("Game Panel");
+                ImGui::Begin("GameBoard Panel");
                 ImGui::Text("End of the game!");
                 if (ImGui::Button("Restart"))
                 {
@@ -559,7 +517,7 @@ int main() {
                         }
                     }
                     else if (handCompleted && withWinner) {
-                        ImGui::Begin("Game Panel");
+                        ImGui::Begin("GameBoard Panel");
 
                         if (isLastHand)
                         {
@@ -778,9 +736,7 @@ void assignCardValues(std::vector<Card>& deck, const CardValues& cardValues) {
 
 // Function to shuffle the deck
 void shuffleDeck(std::vector<Card>& deck) {
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(deck.begin(), deck.end(), g);
+    std::shuffle(deck.begin(), deck.end(), randomGenerator);
 }
 
 // Function to deal cards into players' hands
@@ -1458,8 +1414,6 @@ void renderCardValueManagementPanel(CardValues& cardValues, const std::string& d
 
 
 //--------------------------------------------------------------------------------
-
-
 bool renderPlayerPanel2(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow) {
     // Check if it's the current player's turn
     bool isCurrentPlayer = (player.name == currentPlayer);
@@ -1543,7 +1497,7 @@ bool renderPlayerPanel2(Player& player, playedCardsType& playedCards, const std:
 
 // Function to render the main game panel
 void renderGamePanel2(const playedCardsType& playedCards) {
-    ImGui::Begin("Game Panel");
+    ImGui::Begin("GameBoard Panel");
 
     ImGui::Text("Cards Played This Turn:");
     ImGui::Separator();
@@ -1905,5 +1859,95 @@ void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std
         std::cout << "Card values updated!" << std::endl;
     }
 
+    ImGui::End();
+}
+void renderGamePanel(bool& gameStarted) {
+    static unsigned int userSeed = randomSeed; // Campo per input dell'utente
+
+    ImGui::Begin("Seed Configuration");
+    ImGui::Text("Configure Random Seed:");
+
+    // Input del seed
+    ImGui::InputScalar("Seed", ImGuiDataType_U32, &userSeed);
+    if (ImGui::Button("Apply Seed")) {
+        setRandomSeed(userSeed); // Applica il nuovo seed
+    }
+
+    // Pulsante per generare un seed casuale basato sul tempo
+    if (ImGui::Button("Generate Random Seed")) {
+        unsigned int newSeed = std::random_device{}();
+        //int newSeed = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
+        setRandomSeed(newSeed);
+        userSeed = newSeed; // Aggiorna il valore visibile all'utente
+    }
+
+    ImGui::Text(std::format("Current Seed: {}", randomSeed).c_str());
+
+    ImGui::Separator();
+    if (!gameStarted)
+    {
+        if (ImGui::Button("Start Game"))
+        {
+            gameStarted = true;
+        }
+    }
+    ImGui::End();
+}
+void setRandomSeed(unsigned int seed) {
+    randomSeed = seed;
+    randomGenerator.seed(seed); // Imposta il seed
+    std::cout << "Random seed set to: " << seed << "\n";
+}
+int getPlayerIndexByName(const std::vector<Player>& players, const std::string& name) {
+    for (size_t i = 0; i < players.size(); ++i) {
+        if (players[i].name == name) {
+            return static_cast<int>(i); // Return the index if the name matches
+        }
+    }
+    return -1; // Return -1 if the player is not found
+}
+
+int getNextPlayerIndex(int currentPlayerIndex, int totalPlayers) {
+    return (currentPlayerIndex + 1) % totalPlayers; // Circular turn order
+}
+void renderGameboardPanel(const playedCardsType& playedCards, bool& automove, bool& autoplay, bool handCompleted) {
+    ImGui::Begin("GameBoard Panel");
+    //TextFormatted("{h1}Titolo Principale{h0}\n{h2}Sottotitolo{h0}\nTesto normale {FF0000}rosso{h2} e poi di nuovo sottotitolo{0000FF}blu{h0} e poi normale");
+   // TextFormatted("Testo normale {FF0000}rosso{FFFFFF} e poi normale");
+    ImGui::Text("Cards Played This Turn:");
+    ImGui::Separator();
+
+    for (const auto& [playerName, card] : playedCards) {
+        ImGui::PushStyleColor(ImGuiCol_Text, getSuitColor(card.suit)); // Color based on the suit
+        ImGui::Text("%s played %s of %s %s  (%+d points)",
+            playerName.c_str(),
+            card.value.c_str(),
+            card.suit.c_str(),
+            iconify(card.suit).c_str(),
+            card.pointValue); // Card value, suit, and point value*/
+
+        /* TextFormatted("%s played {h1}%s{h0} of %s {h1}%s{h0}  (%+d points)",
+             playerName.c_str(),
+             card.value.c_str(),
+             card.suit.c_str(),
+             iconify(card.suit).c_str(),
+             card.pointValue);*/
+
+        ImGui::PopStyleColor();
+    }
+    if (!handCompleted)
+    {
+        if (ImGui::Button("Auto Move"))
+        {
+            automove = true;
+        };
+        ImGui::SameLine();
+        ImGui::Checkbox("Auto Play", &autoplay);
+        if (autoplay)
+        {
+            automove = true;
+        }
+    }
+    ImGui::Separator();
     ImGui::End();
 }

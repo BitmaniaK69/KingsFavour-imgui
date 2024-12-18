@@ -104,6 +104,15 @@ struct Player {
     int swappedThisTurn = 0;
 };
 
+struct CardValues {
+    int baseValues[5] = { +1, +2, +2, +3, +3 };       // Valori dei semi base (1,6,7,8,9)
+    int betrayalValues[9] = { -2, -1, -1, -1, -1, -1, -1, -2, -2 }; // Betrayal (1-9, 0)
+    int parliamentPositive = 3;               // Valore positivo per Parliament
+    int parliamentNegative = -1;              // Valore negativo per Parliament
+    int guardValue = 3;                       // Valore della Guardia
+    int coinValue = 1;                        // Valore della Moneta
+};
+
 using playedCardsType = std::vector<std::pair<std::string, Card>>;
 
 //------------------------------------------------------------------------------------
@@ -196,7 +205,7 @@ std::string iconify(const std::string& name) {
 
 // Functions for initializing, shuffling, and dealing the deck
 std::vector<Card> initializeDeck();
-
+void assignCardValues(std::vector<Card>& deck, const CardValues& cardValues);
 void shuffleDeck(std::vector<Card>& deck);
 
 void dealToHands(std::vector<Player>& players, std::vector<Card>& deck);
@@ -213,7 +222,7 @@ void playerRandomSwap(std::vector<Player>& players, int& coinsInTreasury);
 void simulateTurn(int turn, int& coinsInTreasury, std::vector<Player>& players, std::vector<Card>& deck);
 
 // UI Rendering Functions (using Dear ImGui as an example)
-bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow,bool& automove, std::vector<Player>& allPlayers, int& coinsInTreasury, const std::string& suitToFollow, bool handCompleted);
+bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow, bool& automove, std::vector<Player>& allPlayers, int& coinsInTreasury, const std::string& suitToFollow, bool handCompleted, const CardValues& cardValues);
 bool renderPlayerPanel2(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow);
 
 // Helper function to get the color corresponding to the suit (For UI)
@@ -222,12 +231,58 @@ ImVec4 getSuitColor(const std::string& suit);
 // Function to determine the winner of the hand and update the winner hand, managing also special cases (Parliament, guard)
 bool determineWinnerAndResetHand(playedCardsType& playedCards, std::vector<Player>& players, int& coinsInTreasury, bool isLastHand, Player& winner);
 
-void CalculateScore(playedCardsType& playedCards, Player& winner);
+void CalculateScore(playedCardsType& playedCards, Player& player, const CardValues& cardValues);
+int CalculatePScore(playedCardsType& playedCards, const CardValues& cardValues);
 
 // Function to determine the winner and update the winner hand - Previous version
 bool determineWinnerAndResetHand2(playedCardsType& playedCards, std::vector<Player>& players, int& coinsInTreasury, bool isLastHand, Player& winner);
 
 void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck);
+void updatePlayerHandValues(std::vector<Player>& players, const CardValues& cardValues);
+void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std::vector<Player>& players);
+void renderCardValueManagementPanel(CardValues& cardValues, const std::string& directoryPath, std::string& selectedFile);
+
+
+
+#include <iomanip>
+#include <ctime>
+void ensureDirectoryExists(const std::string& directoryPath) {
+    try {
+        if (!std::filesystem::exists(directoryPath)) {
+            std::filesystem::create_directories(directoryPath);
+            std::cout << "Directory created: " << directoryPath << std::endl;
+        }
+    }
+    catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Error ensuring directory exists: " << e.what() << std::endl;
+    }
+}
+
+std::vector<std::string> getConfigFiles(const std::string& directoryPath) {
+    std::vector<std::string> files;
+
+    try {
+        if (!std::filesystem::exists(directoryPath)) {
+            throw std::runtime_error("Directory does not exist: " + directoryPath);
+        }
+
+        for (const auto& entry : std::filesystem::directory_iterator(directoryPath)) {
+            if (entry.is_regular_file()) {
+                files.push_back(entry.path().filename().string());
+            }
+        }
+    }
+    catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Filesystem error: " << e.what() << std::endl;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
+
+    return files;
+}
+
+
 
 //------------------------------------------------------------------------------------
 
@@ -242,7 +297,7 @@ int getPlayerIndexByName(const std::vector<Player>& players, const std::string& 
 int getNextPlayerIndex(int currentPlayerIndex, int totalPlayers) {
     return (currentPlayerIndex + 1) % totalPlayers; // Circular turn order
 }
-void renderGamePanel(const playedCardsType& playedCards, bool& automove, bool handCompleted) {
+void renderGamePanel(const playedCardsType& playedCards, bool& automove, bool& autoplay, bool handCompleted) {
     ImGui::Begin("Game Panel");
     //TextFormatted("{h1}Titolo Principale{h0}\n{h2}Sottotitolo{h0}\nTesto normale {FF0000}rosso{h2} e poi di nuovo sottotitolo{0000FF}blu{h0} e poi normale");
    // TextFormatted("Testo normale {FF0000}rosso{FFFFFF} e poi normale");
@@ -258,18 +313,27 @@ void renderGamePanel(const playedCardsType& playedCards, bool& automove, bool ha
             iconify(card.suit).c_str(),
             card.pointValue); // Card value, suit, and point value*/
 
-       /* TextFormatted("%s played {h1}%s{h0} of %s {h1}%s{h0}  (%+d points)",
-            playerName.c_str(),
-            card.value.c_str(),
-            card.suit.c_str(),
-            iconify(card.suit).c_str(),
-            card.pointValue);*/
+        /* TextFormatted("%s played {h1}%s{h0} of %s {h1}%s{h0}  (%+d points)",
+             playerName.c_str(),
+             card.value.c_str(),
+             card.suit.c_str(),
+             iconify(card.suit).c_str(),
+             card.pointValue);*/
 
         ImGui::PopStyleColor();
     }
     if (!handCompleted)
     {
-       ImGui::Checkbox("Auto Move", &automove);
+        if (ImGui::Button("Auto Move"))
+        {
+            automove = true;
+        };
+        ImGui::SameLine();
+        ImGui::Checkbox("Auto Play", &autoplay);
+        if (autoplay)
+        {
+            automove = true;
+        }
     }
     ImGui::Separator();
     ImGui::End();
@@ -279,8 +343,8 @@ void renderGamePanel(const playedCardsType& playedCards, bool& automove, bool ha
 // MAIN
 //------------------------------------------------------------------------------------
 int main() {
-     // Create application window
-    //ImGui_ImplWin32_EnableDpiAwareness();
+    // Create application window
+   //ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc = { sizeof(wc), CS_OWNDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"ImGui Example", nullptr };
     ::RegisterClassExW(&wc);
     HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Dear ImGui Win32+OpenGL3 Example", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
@@ -330,7 +394,18 @@ int main() {
     // Initialize players and deck
     std::vector<Player> players = { {"Anna"}, {"Bob"}, {"Charlie"}, {"Diana"} };
     std::vector<Card> deck = initializeDeck();
+
+    // Initial configuration of values
+    CardValues cardValues;
+
+    // Assign values to the deck
+    assignCardValues(deck, cardValues);
+
     shuffleDeck(deck);
+
+
+
+
     int coinsInTreasury = 12;
 
     // Deal initial cards to players
@@ -368,7 +443,7 @@ int main() {
     bool isLastHand = false;
     bool isLastRound = false;
     bool isGameOver = false;
-
+    std::string selectedFile;
 
     std::string currentPlayer = players[0].name; // Initialize with the first player
     int currentPlayerIndex = 0; // Track the index of the current player
@@ -378,6 +453,9 @@ int main() {
     GLuint backgroundTexture;
     backgroundTexture = LoadTexture("background3.png", imgWidth, imgHeight);  // Carica l'immagine
     bool automove = false;
+    bool autoplay = false;
+
+    //-------------------------------------------------------------------------------------
 
     while (!done)
     {
@@ -404,37 +482,37 @@ int main() {
         ImGui::NewFrame();
 
         if (backgroundTexture != 0) {
-            RenderBackgroundWithAspectRatio(backgroundTexture, imgWidth, imgHeight);  // Disegna l'immagine come sfondo
+            RenderBackgroundWithAspectRatio(backgroundTexture, imgWidth, imgHeight);  // Draw the image as background
         }
-
+        renderValueConfigPanel(cardValues, deck, players);
         // Main loop
         {
-                // Render player panels
-                for (auto& player : players) {
-                    std::string suitToFollow;
-                    if (!playedCards.empty()) {
-                        suitToFollow = playedCards[0].second.suit;
+            // Render player panels
+            for (auto& player : players) {
+                std::string suitToFollow;
+                if (!playedCards.empty()) {
+                    suitToFollow = playedCards[0].second.suit;
+                }
+
+                if (renderPlayerPanel(player, playedCards, currentPlayer, handCompleted, automove, players, coinsInTreasury, suitToFollow, handCompleted, cardValues)) {
+
+                    // Check if the current player has played their card
+                    auto it = std::find_if(playedCards.begin(), playedCards.end(),
+                        [&](const std::pair<std::string, Card>& entry) {
+                            return entry.first == currentPlayer;
+                        });
+
+                    if (it != playedCards.end()) {
+                        // Move to the next player
+                        currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
+                        currentPlayer = players[currentPlayerIndex].name;
                     }
-
-                    if (renderPlayerPanel(player, playedCards, currentPlayer, handCompleted, automove, players, coinsInTreasury, suitToFollow, handCompleted)) {
-
-                        // Check if the current player has played their card
-                        auto it = std::find_if(playedCards.begin(), playedCards.end(),
-                            [&](const std::pair<std::string, Card>& entry) {
-                                return entry.first == currentPlayer;
-                            });
-
-                        if (it != playedCards.end()) {
-                            // Move to the next player
-                            currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
-                            currentPlayer = players[currentPlayerIndex].name;
-                        }
-                        player.swappedThisTurn = false;
-                    }
+                    player.swappedThisTurn = false;
+                }
             }
-            
-            renderGamePanel(playedCards, automove, handCompleted);
-            
+
+            renderGamePanel(playedCards, automove, autoplay, handCompleted);
+            renderCardValueManagementPanel(cardValues, "./configs", selectedFile);
             isLastRound = deck.size() <= players.size();
             if (isGameOver)
             {
@@ -459,9 +537,9 @@ int main() {
                             {
                                 auto& winningPlayer = *std::find_if(players.begin(), players.end(),
                                     [&](const Player& p) { return p.name == winner.name; });
-                              
+
                                 winningPlayer.wonCards = winner.wonCards;
-                                CalculateScore(playedCards, winningPlayer);
+                                CalculateScore(playedCards, winningPlayer, cardValues);
                                 /*winningPlayer.points = winner.points; // Add card points to player's total points
                                 winningPlayer.lastScore = winner.lastScore; // Add card points to player's total points*/
 
@@ -525,17 +603,23 @@ int main() {
                             withWinner = false;
                             isLastHand = false;
                         }
+                        ImGui::SameLine();
+                        ImGui::Checkbox("Auto Play", &autoplay);
+                        if (autoplay)
+                        {
+                            automove = true;
+                        }
                         ImGui::Separator();
                         ImGui::End();
                     }
                 }
 
             }
-}
-    
+        }
+
 
         // Determine winner of the hand
-        
+
 
         // Global game information panel
         ImGui::Begin("Game Info");
@@ -639,8 +723,6 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return ::DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
-
-
 // Function to initialize the deck of cards
 std::vector<Card> initializeDeck() {
     std::vector<Card> deck;
@@ -669,8 +751,30 @@ std::vector<Card> initializeDeck() {
     deck.push_back({ "P", "Parliament", 0,4 });
     deck.push_back({ "P", "Parliament", 0,5 });
 
+
     return deck;
 }
+void assignCardValues(std::vector<Card>& deck, const CardValues& cardValues) {
+    for (auto& card : deck) {
+        if (card.suit == "Betrays") {
+            card.pointValue = cardValues.betrayalValues[std::stoi(card.value) - 1]; // Valore basato sull'indice
+        }
+        else if (card.suit == "Crowns" || card.suit == "Weapons" ||
+            card.suit == "Faith" || card.suit == "Diamonds") {
+            int index = (std::stoi(card.value) == 1) ? 0 : std::stoi(card.value) - 6;
+            if (index >= 0 && index < 5) {
+                card.pointValue = cardValues.baseValues[index];
+            }
+        }
+        else if (card.suit == "Parliament") {
+            card.pointValue = (card.value == "P") ? cardValues.parliamentPositive : cardValues.parliamentNegative;
+        }
+        else if (card.suit == "Guard") {
+            card.pointValue = cardValues.guardValue;
+        }
+    }
+}
+
 
 // Function to shuffle the deck
 void shuffleDeck(std::vector<Card>& deck) {
@@ -834,7 +938,7 @@ void simulateTurn(int turn, int& coinsInTreasury, std::vector<Player>& players, 
 void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck)
 {
     std::cout << "Dealing new cards for the next round...\n";
-     for (auto& player : players) {
+    for (auto& player : players) {
         player.hand.clear();
         for (int i = 0; i < 4; ++i) // Cards in hand = 4
         {
@@ -846,10 +950,81 @@ void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck)
     }
 }
 
+int checkMemoryDeck(const Player& player, const std::string& suitToFollow)
+{
+    int ret = 0;
+    for (const auto& card : player.wonCards)
+    {
+        if (card.suit == suitToFollow)
+            ret++;
+    }
+    return ret;
+}
 
 //--------------------------------------------------------------------------------
+bool findBestCombination(
+    const std::vector<Card>& hand,
+    const playedCardsType& playedCards,
+    Player& player, const CardValues& cardValues, const std::string& suitToFollow, std::vector<Card>& retCards, bool memory = false) {
 
-Card chooseBestCard(const std::vector<Card>& hand, const std::string& suitToFollow, const playedCardsType& playedCards, Player& player) {
+
+    int maxScore = std::numeric_limits<int>::min();
+    int highestOrder = std::numeric_limits<int>::min();
+    Card bestCard = hand.front(); // Default to the first card in hand
+    bool found = false;
+    // Iterate through all cards in hand to simulate combinations
+    //int parliamentars = checkMemoryDeck(hand, "Parliament");
+
+    for (const auto& card : hand) {
+        // Simulate playing this card
+        playedCardsType simulatedCards = playedCards;
+
+        // Add the current card to the simulated cards
+        simulatedCards.push_back({ player.name, card });
+        if (memory && card.suit == "Parliament")
+        {
+            if (checkMemoryDeck(player, "Parliament") >= 2)    //We don't want to risk other parliaments
+                break;
+        }
+        // Calculate the score for this combination
+        //playedCardsType& playedCards, Player& player, const CardValues& cardValues)
+        if (suitToFollow != "" && card.suit == suitToFollow) {
+            int simulatedScore = CalculatePScore(simulatedCards, cardValues);
+
+            // Compare with the max score
+            if (simulatedScore > 0) {
+                if (simulatedScore > maxScore && card.order > highestOrder) {
+                    maxScore = simulatedScore;
+                    bestCard = card;
+                    found = true;
+                    highestOrder = card.order;
+                    retCards.clear();
+                    retCards.push_back(card);
+                }
+                else if (simulatedScore == maxScore && card.order >= highestOrder) {
+                    maxScore = simulatedScore;
+                    found = true;
+                    highestOrder = card.order;
+                    retCards.push_back(card);
+                }
+            }
+        }
+    }
+    return found;
+}
+
+Card chooseBestCard(const std::vector<Card>& hand, const std::string& suitToFollow, const playedCardsType& playedCards, Player& player, const CardValues& cardValues) {
+
+    if (suitToFollow.size() && chance(50 + (playedCards.size()) * 10)) { // Aggiungi una probabilità di usare questa logica
+        std::vector<Card> cards;
+        if (findBestCombination(hand, playedCards, player, cardValues, suitToFollow, cards))
+        {
+            if (cards.size() == 1)
+            {
+                return cards[0];
+            }
+        }
+    }
 
     // Verifica se sono state giocate delle Betrayal
     if (chance(80))
@@ -925,7 +1100,7 @@ Card chooseBestCard(const std::vector<Card>& hand, const std::string& suitToFoll
         int minValue = 999;
         Card selected;
         for (const auto& card : hand) {
-            if (card.pointValue >= 0 && card.pointValue< minValue) {
+            if (card.pointValue >= 0 && card.pointValue < minValue) {
                 minValue = card.pointValue;
                 selected = card;
             }
@@ -939,25 +1114,26 @@ Card chooseBestCard(const std::vector<Card>& hand, const std::string& suitToFoll
     /*if (chance(20))
     {
         if (!player.swappedThisTurn && player.coins > 0) {
-                       
+
                 // Swap the selected hand card with the swap card
                 std::swap(player.hand[i], player.swapCard);
                 player.coins--; // Deduct a coin for the swap
                 coinsInTreasury++;
 
                 player.swappedThisTurn = i + 1;
-            
+
         }
     }*/
 
+
     // Logica 6: Gioca la carta meno penalizzante
-        const Card* leastNegativeCard = &hand.front();
-        for (const auto& card : hand) {
-            if (card.pointValue > leastNegativeCard->pointValue) {
-                leastNegativeCard = &card;
-            }
+    const Card* leastNegativeCard = &hand.front();
+    for (const auto& card : hand) {
+        if (card.pointValue > leastNegativeCard->pointValue) {
+            leastNegativeCard = &card;
         }
-    
+    }
+
 
     return *leastNegativeCard;
 }
@@ -965,7 +1141,7 @@ Card chooseBestCard(const std::vector<Card>& hand, const std::string& suitToFoll
 
 //--------------------------------------------------------------------------------
 
-bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow,bool& automove,  std::vector<Player>& allPlayers, int& coinsInTreasury, const std::string& suitToFollow, bool handCompleted) {
+bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow, bool& automove, std::vector<Player>& allPlayers, int& coinsInTreasury, const std::string& suitToFollow, bool handCompleted, const CardValues& cardValues) {
 
     ImGui::Begin(("Player " + player.name).c_str());
     ImGui::Text("Coins: %d", player.coins);
@@ -1009,7 +1185,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             buttonText = "Hidden Card";
         }
 
-      
+
 
         if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(100, 80))) {
             if (isCurrentPlayer && !justShow) {
@@ -1020,26 +1196,26 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                 played = true;
             }
         }
-        
+
         ImGui::PopStyleColor(4);
         if (i < player.hand.size() - 1) {
             ImGui::SameLine();
         }
 
     }
-   
+
     for (size_t i = 0; i < player.hand.size(); ++i) {
         // Swap with swapCard
         if (isCurrentPlayer && !justShow && !player.swappedThisTurn && player.coins > 0) {
-         
+
             if (ImGui::Button(("Swap##swap_" + std::to_string(i)).c_str(), ImVec2(100, 20))) {
                 // Swap the selected hand card with the swap card
                 std::swap(player.hand[i], player.swapCard);
                 player.coins--; // Deduct a coin for the swap
                 coinsInTreasury++;
 
-                player.swappedThisTurn = i+1;
-                
+                player.swappedThisTurn = i + 1;
+
                 std::cout << "Player " << player.name << " swapped hand card " << player.hand[i].value
                     << " with their swap card " << player.swapCard.value << "\n";
 
@@ -1080,14 +1256,14 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             player.swapCard.pointValue);
     }
 
-    if (ImGui::Button((hiddenText +"##swapCard_" + player.name).c_str(), ImVec2(100, 80)))
+    if (ImGui::Button((hiddenText + "##swapCard_" + player.name).c_str(), ImVec2(100, 80)))
     {
         if (isCurrentPlayer && player.swappedThisTurn)
         {
-            
+
             playedCards.push_back({ player.name, player.swapCard });
             std::swap(player.hand[player.swappedThisTurn - 1], player.swapCard);
-            player.hand.erase(player.hand.begin() + (player.swappedThisTurn-1));
+            player.hand.erase(player.hand.begin() + (player.swappedThisTurn - 1));
             std::cout << "Player " << player.name << " played " << playedCards.back().second.value
                 << " of " << playedCards.back().second.suit << "\n";
             played = true;
@@ -1123,10 +1299,10 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
 
     if (isCurrentPlayer && !handCompleted) {
         ImGui::SameLine();
-        if ( automove || ImGui::Button("Auto Move##auto_move", ImVec2(200, 40))) {
+        if (automove || ImGui::Button("Auto Move##auto_move", ImVec2(200, 40))) {
             if (!player.hand.empty()) {
                 // Scegli la migliore carta da giocare
-                Card bestCard = chooseBestCard(player.hand, suitToFollow, playedCards, player);
+                Card bestCard = chooseBestCard(player.hand, suitToFollow, playedCards, player, cardValues);
                 automove = false;
                 // Aggiungi la carta scelta a playedCards
                 playedCards.push_back({ player.name, bestCard });
@@ -1157,6 +1333,123 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
     }
 
     return played;
+}
+//--------------------------------------------------------------------------------
+
+void saveCardValues(const std::string& filename, const CardValues& cardValues) {
+    json j;
+
+    j["baseValues"] = { cardValues.baseValues[0], cardValues.baseValues[1], cardValues.baseValues[2], cardValues.baseValues[3], cardValues.baseValues[4] };
+    j["betrayalValues"] = { cardValues.betrayalValues[0], cardValues.betrayalValues[1], cardValues.betrayalValues[2], cardValues.betrayalValues[3],
+                            cardValues.betrayalValues[4], cardValues.betrayalValues[5], cardValues.betrayalValues[6], cardValues.betrayalValues[7], cardValues.betrayalValues[8] };
+    j["parliamentPositive"] = cardValues.parliamentPositive;
+    j["parliamentNegative"] = cardValues.parliamentNegative;
+    j["guardValue"] = cardValues.guardValue;
+    j["coinValue"] = cardValues.coinValue;
+
+    std::ofstream file(filename);
+    if (file.is_open()) {
+        file << j.dump(4); // Salva con indentazione per leggibilità
+        file.close();
+    }
+}
+
+void loadCardValues(const std::string& filename, CardValues& cardValues) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Error: Could not open file " << filename << std::endl;
+        return;
+    }
+
+    json j;
+    file >> j;
+
+    for (int i = 0; i < 5; ++i) {
+        cardValues.baseValues[i] = j["baseValues"][i];
+    }
+    for (int i = 0; i < 9; ++i) {
+        cardValues.betrayalValues[i] = j["betrayalValues"][i];
+    }
+
+    cardValues.parliamentPositive = j["parliamentPositive"];
+    cardValues.parliamentNegative = j["parliamentNegative"];
+    cardValues.guardValue = j["guardValue"];
+    cardValues.coinValue = j["coinValue"];
+}
+
+
+//renderConfigManagementPanel(daimyoList, scoringRules, "./configs", selectedFile, daimyoNames);
+void renderCardValueManagementPanel(CardValues& cardValues, const std::string& directoryPath, std::string& selectedFile) {
+    std::string sourcePath = directoryPath + "/" + selectedFile;
+    std::string duplicateName = selectedFile + "_copy";
+    std::string destinationPath = directoryPath + "/" + duplicateName;
+
+    ensureDirectoryExists(directoryPath);
+
+    static std::vector<std::string> configFiles = getConfigFiles(directoryPath);
+    static char newFileName[128] = "";
+
+    ImGui::Begin("Card Value Configuration");
+
+    // Lista di file disponibili
+    ImGui::Text("Available Configurations:");
+    ImGui::Separator();
+    for (const auto& file : configFiles) {
+        bool isSelected = (selectedFile == file);
+        if (ImGui::Selectable(file.c_str(), isSelected)) {
+            selectedFile = file; // Imposta il file selezionato
+            strncpy(newFileName, selectedFile.c_str(), 128);
+        }
+    }
+
+    ImGui::Separator();
+
+    // Campo per creare un nuovo file
+    ImGui::InputText("File Name", newFileName, sizeof(newFileName));
+    ImGui::SameLine();
+    if (ImGui::Button("Generate")) {
+        auto now = std::chrono::system_clock::now();
+        auto nowTimeT = std::chrono::system_clock::to_time_t(now);
+        std::ostringstream oss;
+        oss << "config_" << std::put_time(std::localtime(&nowTimeT), "%Y%m%d_%H%M%S") << ".json";
+        strncpy(newFileName, oss.str().c_str(), sizeof(newFileName) - 1);
+    }
+
+    // Pulsante per caricare la configurazione
+    if (ImGui::Button("Load Configuration")) {
+        if (!selectedFile.empty()) {
+            std::string fullPath = directoryPath + "/" + selectedFile;
+            loadCardValues(fullPath, cardValues);
+            ImGui::Text("Loaded configuration: %s", selectedFile.c_str());
+        }
+    }
+
+    ImGui::Separator();
+
+    // Pulsante per salvare la configurazione
+    if (ImGui::Button("Save Configuration")) {
+        std::string fullPath = directoryPath + "/" + std::string(newFileName);
+        saveCardValues(fullPath, cardValues);
+        ImGui::Text("Saved configuration to: %s", fullPath.c_str());
+        configFiles = getConfigFiles(directoryPath); // Aggiorna la lista di file
+    }
+
+    ImGui::Separator();
+
+    // Pulsante per cancellare un file
+    if (!selectedFile.empty() && ImGui::Button("Delete Selected Configuration")) {
+        std::string fullPath = directoryPath + "/" + selectedFile;
+        try {
+            std::filesystem::remove(fullPath);
+            selectedFile.clear();
+            configFiles = getConfigFiles(directoryPath); // Aggiorna l'elenco
+        }
+        catch (const std::filesystem::filesystem_error& e) {
+            std::cerr << "Failed to delete file: " << e.what() << std::endl;
+        }
+    }
+
+    ImGui::End();
 }
 
 
@@ -1222,7 +1515,7 @@ bool renderPlayerPanel2(Player& player, playedCardsType& playedCards, const std:
             buttonText = "";
         }
 
-       
+
         if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(100, 80))) {
             if (isCurrentPlayer && !justShow) {
                 // Add the selected card to playedCards
@@ -1278,10 +1571,10 @@ bool determineWinnerAndResetHand(
 
     // Determine the suit to follow (first card's suit)
 
-    std:string suitToFollow;
+std:string suitToFollow;
     for (auto card : playedCards)
     {
-        if (card.second.suit != "Guard" && card.second.suit != "Betrays" && card.second.suit!="Parliament")
+        if (card.second.suit != "Guard" && card.second.suit != "Betrays" && card.second.suit != "Parliament")
         {
             suitToFollow = card.second.suit;
             break;
@@ -1353,7 +1646,36 @@ bool determineWinnerAndResetHand(
     return false; // No winner
 }
 
-void CalculateScore(playedCardsType& playedCards, Player& player)
+
+int CalculatePScore(playedCardsType& playedCards, const CardValues& cardValues)
+{
+    int points = 0;
+    int parliamentCount = 0;
+
+    for (auto item : playedCards)
+    {
+        Card card = item.second;
+        if (card.suit != "Parliament")
+        {
+            points += card.pointValue;
+        }
+        else
+        {
+            parliamentCount++;
+        }
+    }
+    if ((parliamentCount % 2) == 1)
+    {
+        points += cardValues.parliamentNegative;
+    }
+    else if (((parliamentCount % 2) == 0) && parliamentCount > 1)
+    {
+        points += cardValues.parliamentPositive;
+    }
+    return points;
+}
+
+void CalculateScore(playedCardsType& playedCards, Player& player, const CardValues& cardValues)
 {
     player.lastScore = player.points;
     player.points = 0;
@@ -1361,30 +1683,30 @@ void CalculateScore(playedCardsType& playedCards, Player& player)
     player.negativePoints = 0;
     player.parliaments = 0;
     int parliamentCount = 0;
-   
+
     for (auto card : player.wonCards)
     {
         if (card.suit != "Parliament")
         {
             player.points += card.pointValue;
-            if (card.pointValue>0) player.goodPoints+= card.pointValue;
-            else if (card.pointValue < 0) player.negativePoints+= card.pointValue;
+            if (card.pointValue > 0) player.goodPoints += card.pointValue;
+            else if (card.pointValue < 0) player.negativePoints += card.pointValue;
         }
         else
         {
             parliamentCount++;
-            
         }
     }
     if ((parliamentCount % 2) == 1)
     {
-        player.points -= -1;
-        player.parliaments=-1;
+        player.points += cardValues.parliamentNegative;
+        player.parliaments = cardValues.parliamentNegative;
+
     }
     else if (parliamentCount > 1)
     {
-        player.points += 3;
-        player.parliaments = 3;
+        player.points += cardValues.parliamentPositive;
+        player.parliaments = cardValues.parliamentPositive;
     }
 
 }
@@ -1438,12 +1760,150 @@ bool determineWinnerAndResetHand2(
 // Helper function to get the color based on suit
 ImVec4 getSuitColor(const std::string& suit) {
     if (suit == "Weapons") return ImVec4(1.0f, 0.0f, 0.0f, 1.0f); // Red
-    if (suit == "Crowns") return ImVec4(0.7f, 0.7f, 0.0f, 1.0f); // Yellow
-    if (suit == "Faith") return ImVec4(0.0f, 0.7f, 0.0f, 1.0f); // Green
+    if (suit == "Crowns") return ImVec4(0.7f, 0.7f, 0.1f, 1.0f); // Yellow
+    if (suit == "Faith") return ImVec4(0.0f, 0.8f, 0.0f, 1.0f); // Green
     if (suit == "Diamonds") return ImVec4(0.0f, 0.0f, 1.0f, 1.0f); // Blue
-    if (suit == "Betrays") return ImVec4(0.35f, 0.0f, 0.35f, 1.0f); // Dark Purple
-    if (suit == "Parliament") return ImVec4(0.55f, 0.4f, 0.1f, 1.0f); // Brown
-    if (suit == "Guard") return ImVec4(0.6f, 0.6f, 0.6f, 1.0f); // White
+    if (suit == "Betrays") return ImVec4(0.45f, 0.0f, 0.45f, 1.0f); // Dark Purple
+    if (suit == "Parliament") return ImVec4(0.55f, 0.4f, 0.2f, 1.0f); // Brown
+    if (suit == "Guard") return ImVec4(0.6f, 0.6f, 0.7f, 1.0f); // White
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // Default White
 }
+std::string getSuitColorString(const std::string& suit) {
+    ImVec4 color = getSuitColor(suit);
+    // Convert ImVec4 to 8-bit RGBA values
+    int r = static_cast<int>(color.x * 255);
+    int g = static_cast<int>(color.y * 255);
+    int b = static_cast<int>(color.z * 255);
+    int a = static_cast<int>(color.w * 255);
 
+    // Format as "{RRGGBBAA}"
+    std::ostringstream oss;
+    oss << std::uppercase << std::setfill('0') << std::hex;
+    oss << "{" << std::setw(2) << r
+        << std::setw(2) << g
+        << std::setw(2) << b
+        << std::setw(2) << a << "}";
+
+    return oss.str();
+}
+
+void updatePlayerHandValues(std::vector<Player>& players, const CardValues& cardValues) {
+    for (auto& player : players) {
+        for (auto& card : player.hand) {
+            // Update the card's point value based on the current cardValues
+            if (card.suit == "Crowns" || card.suit == "Weapons" || card.suit == "Faith" || card.suit == "Diamonds") {
+                // Base cards
+                int index = std::stoi(card.value) - 5;
+                card.pointValue = card.value == "1" ? cardValues.baseValues[0] : card.value >= "6" ? cardValues.baseValues[index] : 0;
+            }
+            else if (card.suit == "Betrays") {
+                // Betrayal
+                int index = std::stoi(card.value) - 1;
+                card.pointValue = cardValues.betrayalValues[index];
+            }
+            else if (card.suit == "Parliament") {
+                // Parliament
+                card.pointValue = 3;
+            }
+            else if (card.suit == "Guard") {
+                // Guard
+                card.pointValue = cardValues.guardValue;
+            }
+        }
+    }
+}
+
+void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std::vector<Player>& players) {
+    ImGui::Begin("Card Values Configuration");
+
+    static bool valuesChanged = false; // Traccia se ci sono cambiamenti
+    /* { "Crowns", ICON_FA_CROWN },
+ { "Weapons", ICON_FA_TROWEL },
+ { "Faith", ICON_FA_CROSS },
+ { "Diamonds", ICON_FA_GEM },
+ { "Betrays", ICON_FA_DRAGON },
+ { "Guards", ICON_FA_SHIELD_HALVED },
+ { "Parliament", ICON_FA_BUILDING_COLUMNS }*/
+
+ // Configuration of the values of the base cards
+    static std::string frmtxt = std::format("Base Suit Values {}{} {}{} {}{} {}{}{}:\n", getSuitColorString("Crowns"), ICON_FA_CROWN, getSuitColorString("Weapons"), ICON_FA_TROWEL, getSuitColorString("Faith"), ICON_FA_CROSS, getSuitColorString("Diamonds"), ICON_FA_GEM, "{FFFFFFFF}");
+    ImGui::TextFormatted(frmtxt.c_str());
+    // ImGui::TextFormatted("Base Suit Values{FF0000FF}rosso{FFFFFFFF} e poi normale{00FF00}verde{FFFFFF}\n");
+    static std::vector<std::string>ids = { "A", "6", "7", "8", "9" };
+    ImGui::PushItemWidth(64);
+    for (int i = 0; i < 5; ++i) {
+        if (ImGui::InputInt(std::format("{} " ICON_FA_SD_CARD, ids[i]).c_str(), &cardValues.baseValues[i])) {
+            cardValues.baseValues[i] = std::clamp<int>(cardValues.baseValues[i], -3, 4);
+            valuesChanged = true;
+        }
+    }
+
+    ImGui::Separator();
+
+    // Configuration of Betrayal values
+    ImGui::Text("Betrayal Values:");
+    static std::vector<std::string>idBs = { "A","2","3","4","5","6", "7", "8", "9" };
+    for (int i = 0; i < 9; ++i) {
+        if (ImGui::InputInt(std::format("##{}", idBs[i]).c_str(), &cardValues.betrayalValues[i])) {
+            cardValues.betrayalValues[i] = std::clamp<int>(cardValues.betrayalValues[i], -3, 4);
+            valuesChanged = true;
+        }
+        ImGui::SameLine();
+        ImGui::TextFormatted(std::format("{}{} {}", idBs[i], getSuitColorString("Betrays"), ICON_FA_DRAGON).c_str());
+    }
+
+    ImGui::Separator();
+
+    // Configuration Parliament
+    ImGui::Text("Parliament Values:");
+    if (ImGui::InputInt("##Parliament2", &cardValues.parliamentPositive))
+    {
+        cardValues.parliamentPositive = std::clamp<int>(cardValues.parliamentPositive, -3, 4);
+        valuesChanged = true;
+    }
+    ImGui::SameLine();
+    ImGui::TextFormatted(std::format("{}{}{}", getSuitColorString("Parliament"), ICON_FA_BUILDING_COLUMNS, ICON_FA_BUILDING_COLUMNS).c_str());
+
+    if (ImGui::InputInt("##Parliament1", &cardValues.parliamentNegative))
+    {
+        cardValues.parliamentNegative = std::clamp<int>(cardValues.parliamentNegative, -3, 4);
+        valuesChanged = true;
+    }
+    ImGui::SameLine();
+    ImGui::TextFormatted(std::format("{}{}", getSuitColorString("Parliament"), ICON_FA_BUILDING_COLUMNS).c_str());
+
+
+    ImGui::Separator();
+
+    // Guard Configuration
+    ImGui::Text("Guard Value:");
+    if (ImGui::InputInt("##guard", &cardValues.guardValue))
+    {
+        cardValues.guardValue = std::clamp<int>(cardValues.guardValue, -3, 4);
+        valuesChanged = true;
+    }
+    ImGui::SameLine();
+    ImGui::TextFormatted(std::format("{}{}", getSuitColorString("Guard"), ICON_FA_SHIELD_HALVED).c_str());
+    ImGui::Separator();
+
+    // Configuration of Coins
+    ImGui::Text("Coin Value:");
+
+    if (ImGui::InputInt(ICON_FA_COINS, &cardValues.coinValue))
+    {
+        cardValues.coinValue = std::clamp<int>(cardValues.coinValue, -3, 4);
+        valuesChanged = true;
+    }
+
+    ImGui::PopItemWidth();
+
+    // Update the values in the deck if they have been changed
+    if (valuesChanged) {
+        assignCardValues(deck, cardValues);
+        updatePlayerHandValues(players, cardValues); // Update the values in the hands of players
+        valuesChanged = false; // Reset after the update
+        std::cout << "Card values updated!" << std::endl;
+    }
+
+    ImGui::End();
+}

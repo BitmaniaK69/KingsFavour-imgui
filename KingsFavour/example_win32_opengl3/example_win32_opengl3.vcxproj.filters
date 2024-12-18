@@ -108,7 +108,7 @@
     <ClInclude Include="..\..\httplib\httplib.h">
       <Filter>httplib</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\textformatted\text_formatted.h">
+    <ClInclude Include="..\..\text_formatted\text_formatted.h">
       <Filter>text_formatted</Filter>
     </ClInclude>
   </ItemGroup>

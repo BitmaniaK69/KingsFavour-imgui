@@ -111,6 +111,7 @@
     <ClInclude Include="..\..\text_formatted\text_formatted.h">
       <Filter>text_formatted</Filter>
     </ClInclude>
+    <ClInclude Include="main.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\README.txt" />

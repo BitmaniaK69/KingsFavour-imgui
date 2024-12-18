@@ -181,6 +181,7 @@
     <ClInclude Include="..\..\nlohmann_json\json.hpp" />
     <ClInclude Include="..\..\stb\stb_image.h" />
     <ClInclude Include="..\..\text_formatted\text_formatted.h" />
+    <ClInclude Include="main.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\misc\natvis\imgui.natvis" />

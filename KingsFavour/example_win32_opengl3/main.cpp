@@ -255,6 +255,7 @@ void playerRandomSwap(std::vector<Player>& players, int& coinsInTreasury);
 
 // Helper function to get the color corresponding to the suit (For UI)
 ImVec4 getSuitColor(const std::string& suit);
+std::string getSuitColorString(const std::string& suit);
 
 // Function to determine the winner of the hand and update the winner hand, managing also special cases (Parliament, guard)
 bool determineWinnerAndResetHand(playedCardsType& playedCards, std::vector<Player>& players, int& coinsInTreasury, bool isLastHand, Player& winner);
@@ -1180,6 +1181,30 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
     ImGui::SameLine();  ImGui::Text(std::format("    {}:{} {}:{} {}:{}", ICON_FA_BUILDING_COLUMNS, player.parliaments, ICON_FA_CIRCLE_PLUS, player.goodPoints, ICON_FA_CIRCLE_MINUS, player.negativePoints).c_str());
     ImGui::Text("Missions: %d", player.missions);
 
+    ImGui::Separator();
+    if (ImGui::Button("Show Won Cards")) {
+        ImGui::OpenPopup("Won Cards");
+    }
+
+    // Popup logic for displaying won cards
+    if (ImGui::BeginPopup("Won Cards")) {
+        ImGui::Text("Cards Won by %s", player.name.c_str());
+        int index = 0;
+        for (const auto& card : player.wonCards) {
+            ImGui::TextFormatted("%s%s%s{FFFFFFFF} (%+d points)\n",
+                card.value.c_str(),
+                getSuitColorString(card.suit).c_str(),
+                iconify(card.suit).c_str(),
+                card.pointValue);
+            index++;
+            if ((index % allPlayers.size()) == 0)
+                ImGui::Separator();
+        }
+        if (ImGui::Button("Close")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
     bool played = false;
     bool isCurrentPlayer = (player.name == currentPlayer);
 

@@ -107,6 +107,9 @@ struct Player {
     int swappedThisTurn = 0;
     bool control = false;
     int coinsCollected = 0;
+
+    std::vector<int> pointsHistory;
+    std::vector<int> coinsHistory;
 };
 
 struct CardValues {
@@ -318,11 +321,13 @@ void initializeGame(Game& game) {
             std::cerr << "Deck is empty! Cannot assign swapCard to " << player.name << "\n";
         }
     }
-
+    game.coinsInTreasury = game.maxCoinsInTreasury;
     for (auto& player : game.players) {
         player.coins = game.initialCoins;
+        game.maxCoinsInTreasury -= game.initialCoins;
     }
-
+   
+    
 }
 //------------------------------------------------------------------------------------
 
@@ -544,7 +549,7 @@ int main() {
                                         }
                                         else {
                                             bool pureHand = (checkGameRoundPlayedDeck("Parliament") + checkGameRoundPlayedDeck("Betrays") + checkGameRoundPlayedDeck("Guard") == 0);
-                                            if (game.coinsInTreasury > 0 && pureHand) {
+                                            if (pureHand) {
                                                 winningPlayer.coins++;
                                                 game.coinsInTreasury--;
                                             }
@@ -605,6 +610,12 @@ int main() {
                                 }
                             }
                             else {
+                                //New round
+                                for (auto& player : game.players)
+                                {
+                                    player.pointsHistory.push_back(player.points);
+                                    player.coinsHistory.push_back(player.coins);
+                                }
                                 game.turn++;
                             }
 
@@ -630,7 +641,7 @@ int main() {
             ImGui::InputInt("Initial Players Coins", &game.initialCoins);
             ImGui::PopItemWidth();
             ImGui::Checkbox("Collect all at the end", &game.collectAtTheEnd);
-            ImGui::Checkbox("Collect every turn", &game.collectEndTurn);
+            ImGui::Checkbox("Collect every turn/pure hand", &game.collectEndTurn);
             ImGui::Checkbox("Collect max 3", &game.collectGap);
 
             if (ImGui::Button("Restore"))
@@ -1242,7 +1253,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             buttonText = "Hidden Card";
         }
 
-        if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(100, 80))) {
+        if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(90, 60))) {
             if (isCurrentPlayer && !justShow) {
                 auto& bestCard = player.hand[i];
                 playedCards.push_back({ player.name, bestCard });
@@ -1278,7 +1289,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             // Swap with swapCard
             if (isCurrentPlayer && !justShow && !player.swappedThisTurn && player.coins > 0) {
 
-                if (ImGui::Button(("Swap##swap_" + std::to_string(i)).c_str(), ImVec2(100, 20))) {
+                if (ImGui::Button(("Swap##swap_" + std::to_string(i)).c_str(), ImVec2(90, 20))) {
                     // Swap the selected hand card with the swap card
                     std::swap(player.hand[i], player.swapCard);
                     player.coins--; // Deduct a coin for the swap
@@ -1327,7 +1338,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                 player.swapCard.pointValue);
         }
 
-        if (ImGui::Button((hiddenText + "##swapCard_" + player.name).c_str(), ImVec2(100, 80)))
+        if (ImGui::Button((hiddenText + "##swapCard_" + player.name).c_str(), ImVec2(90, 60)))
         {
             if (isCurrentPlayer && player.swappedThisTurn)
             {
@@ -1345,7 +1356,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
         // Swap with another player's swapCard
         if (isCurrentPlayer && !justShow && !player.swappedThisTurn && player.coins > 0) {
             ImGui::SameLine();
-            if (ImGui::Button("Swap with\nanother\nplayer's\nSwap Card", ImVec2(100, 80))) {
+            if (ImGui::Button("Swap with\nanother\nplayer's\nSwap Card", ImVec2(90, 60))) {
                 ImGui::OpenPopup("Swap Card");
             }
 
@@ -1399,6 +1410,24 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             ImGui::Checkbox(std::format("Control##control{}", player.name).c_str(), &player.control);
         }
     }
+    if (ImPlot::BeginPlot(("Player Progress##" + player.name).c_str(), ImVec2(-1, 180))) {
+        // Auto-fit X-Axis, but set Y-Axis to include negative values
+        ImPlot::SetupAxes("Hands", "Points / Coins", ImPlotAxisFlags_AutoFit, 0);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, -15, 35);  // Set Y-Axis limits to include negative values
+
+        // Prepare data for plotting
+        std::vector<int> hands(player.pointsHistory.size());
+        std::iota(hands.begin(), hands.end(), 1);  // Hands: [1, 2, 3, ...]
+
+        // Plot points
+        ImPlot::PlotLine(("Points##" + player.name).c_str(), hands.data(), player.pointsHistory.data(), player.pointsHistory.size());
+
+        // Plot coins
+        ImPlot::PlotLine(("Coins##" + player.name).c_str(), hands.data(), player.coinsHistory.data(), player.coinsHistory.size());
+
+        ImPlot::EndPlot();
+    }
+    
     ImGui::End();
 
     // Reset swappedThisTurn at the end of the player's turn

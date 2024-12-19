@@ -182,6 +182,7 @@
     <ClInclude Include="..\..\stb\stb_image.h" />
     <ClInclude Include="..\..\text_formatted\text_formatted.h" />
     <ClInclude Include="main.h" />
+    <ClInclude Include="PlayerProgression.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\misc\natvis\imgui.natvis" />

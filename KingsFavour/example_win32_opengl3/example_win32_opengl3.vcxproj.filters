@@ -112,6 +112,9 @@
       <Filter>text_formatted</Filter>
     </ClInclude>
     <ClInclude Include="main.h" />
+    <ClInclude Include="PlayerProgression.h">
+      <Filter>sources</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\README.txt" />

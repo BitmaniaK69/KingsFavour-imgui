@@ -51,6 +51,7 @@
 #include <cstdint> // uint_fast8_t
 #include <iomanip>
 #include "main.h"
+#include "PlayerProgression.h"
 
 // ImGui and GLFW
 //#include "imgui_impl_glfw.h"
@@ -140,7 +141,8 @@ GLuint LoadTexture(const char* filename, int& width, int& height) {
     unsigned char* data = stbi_load(filename, &width, &height, &channels, 4); // Load as RGBA
 
     if (!data) {
-        std::cerr << "Failed to load image: " << filename << std::endl;
+        PLOG_ERR( "Failed to load image: " << filename );
+        PLOG_ERR_FLUSH("Error", 0);
         return 0;
     }
 
@@ -288,6 +290,7 @@ int getPlayerIndexByName(const std::vector<Player>& players, const std::string& 
 void renderGameboardPanel(const playedCardsType& playedCards, bool& automove, bool& autoplay, bool& automatch, bool handCompleted);
 bool restartGame(std::vector<Player>& players, std::vector<Card>& deck, bool& gameStarted);
 
+
 void initializeGame(Game& game) {
 
     //game.randomSeed = seed;
@@ -314,11 +317,15 @@ void initializeGame(Game& game) {
             // Assign the top card of the deck as the swapCard
             player.swapCard = game.deck.back();
             game.deck.pop_back(); // Remove the card from the deck
-            std::cout << "Assigned swapCard to " << player.name << ": "
-                << player.swapCard.value << " of " << player.swapCard.suit << "\n";
+
+            PLOG("Assigned swapCard to " << player.name << ": "
+                << player.swapCard.value << " of " << player.swapCard.suit );
+            PLOG_FLUSH(player.name, game.turn);
+            
         }
         else {
-            std::cerr << "Deck is empty! Cannot assign swapCard to " << player.name << "\n";
+             PLOG_ERR("Deck is empty! Cannot assign swapCard to " << player.name );
+             PLOG_ERR_FLUSH(player.name, game.turn);
         }
     }
     game.coinsInTreasury = game.maxCoinsInTreasury;
@@ -449,6 +456,9 @@ int main() {
 
         renderValueConfigPanel(cardValues, game.deck, game.players);
         renderGamePanel(game.isStarted);
+
+        renderPlayerProgressionPanelByTurn(game.players.size());
+
         // Main loop
         if (game.isStarted)
         {
@@ -556,9 +566,10 @@ int main() {
                                         }
                                     }
                                 }
-                                std::cout << game.winner.name << " wins the hand and now has "
+                                PLOG( game.winner.name << " wins the hand and now has "
                                     << winningPlayer.points << " points and "
-                                    << winningPlayer.coins << " coins.\n";
+                                    << winningPlayer.coins << " coins.");
+                                PLOG_FLUSH(game.winner.name, game.turn);
                                 // There is a winner
                                 handCompleted = true;
                                 withWinner = true;
@@ -590,7 +601,8 @@ int main() {
                                 {
                                     winningPlayer.coinsCollected = game.coinsInTreasury;
                                     winningPlayer.coins += game.coinsInTreasury;
-                                    std::cout << game.winner.name << " collects the remaining treasury coins!\n";
+                                    PLOG( game.winner.name << " collects the remaining treasury coins!");
+                                    PLOG_FLUSH(game.winner.name, game.turn);
                                     ImGui::Text(std::format("{} collected {} remaining treasury coins!", game.winner.name, game.coinsInTreasury).c_str());
                                     game.coinsInTreasury = 0;
                                 }
@@ -875,7 +887,8 @@ playedCardsType playHand(std::vector<Player>& players, const std::string& suitTo
     for (auto& player : players) {
         Card playedCard = chooseCardToPlay(player, suitToFollow);
         playedCards.push_back({ player.name, playedCard }); // Append to the vector
-        std::cout << "    " << player.name << " plays " << playedCard.value << " of " << playedCard.suit << "\n";
+        PLOG( player.name << " plays " << playedCard.value << " of " << playedCard.suit );
+            PLOG_FLUSH(player.name, game.turn);
     }
     return playedCards;
 }
@@ -923,13 +936,15 @@ void playerRandomSwap(std::vector<Player>& players, int& coinsInTreasury) {
     if (coinsInTreasury > 0) {
         players[0].coins--;
         coinsInTreasury++;
-        std::cout << "    " << players[0].name << " pays 1 coin to swap a card.\n";
+        PLOG( players[0].name << " pays 1 coin to swap a card.");
+        PLOG_FLUSH(players[0].name, game.turn);
     }
 }
 
 void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck)
 {
-    std::cout << "Dealing new cards for the next round...\n";
+    PLOG( "Dealing new cards for the next round...");
+    PLOG_FLUSH(players[0].name, game.turn);
     for (auto& player : players) {
         player.hand.clear();
         for (int i = 0; i < 4; ++i) // Cards in hand = 4
@@ -1185,8 +1200,9 @@ Card chooseBestCard(const std::vector<Card>& hand, const std::string& suitToFoll
 //--------------------------------------------------------------------------------
 
 bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow, bool& automove, std::vector<Player>& allPlayers, int& coinsInTreasury, const std::string& suitToFollow, bool handCompleted, const CardValues& cardValues) {
-
-    ImGui::Begin(("Player " + player.name).c_str());
+    ImGui::SetNextWindowSizeConstraints(ImVec2(410, 350), ImVec2(510, 1550));
+    static bool p_open = true;
+    ImGui::Begin(("Player " + player.name).c_str(), &p_open, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Coins: %d", player.coins);
     ImGui::Text("Points: %d(%+d)", player.points, player.points - player.lastScore);
     ImGui::SameLine();  ImGui::Text(std::format("    {}:{} {}:{} {}:{}", ICON_FA_BUILDING_COLUMNS, player.parliaments, ICON_FA_CIRCLE_PLUS, player.goodPoints, ICON_FA_CIRCLE_MINUS, player.negativePoints).c_str());
@@ -1267,8 +1283,9 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                 }
                 else
                 {
-                    std::cout << "Player " << player.name << " played " << playedCards.back().second.value
-                        << " of " << playedCards.back().second.suit << "\n";
+                    PLOG( "Player " << player.name << " played " << playedCards.back().second.value
+                        << " of " << playedCards.back().second.suit << "");
+                    PLOG_FLUSH(player.name, game.turn);
                 }
                 played = true;
                 ImGui::PopStyleColor(4);
@@ -1297,9 +1314,9 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
 
                     player.swappedThisTurn = i + 1;
 
-                    std::cout << "Player " << player.name << " swapped hand card " << player.hand[i].value
-                        << " with their swap card " << player.swapCard.value << "\n";
-
+                    PLOG( "Player " << player.name << " swapped hand card " << player.hand[i].value
+                        << " with their swap card " << player.swapCard.value << "");
+                    PLOG_FLUSH(player.name, game.turn);
                     // Ensure the colors update correctly (force re-rendering with updated data)
                     ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.hand[i].suit));
                     ImGui::PopStyleColor();
@@ -1346,13 +1363,14 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                 playedCards.push_back({ player.name, player.swapCard });
                 std::swap(player.hand[player.swappedThisTurn - 1], player.swapCard);
                 player.hand.erase(player.hand.begin() + (player.swappedThisTurn - 1));
-                std::cout << "Player " << player.name << " swap-played " << playedCards.back().second.value
-                    << " of " << playedCards.back().second.suit << "\n";
+                PLOG( "Player " << player.name << " swap-played " << playedCards.back().second.value
+                    << " of " << playedCards.back().second.suit << "");
+                PLOG_FLUSH(player.name, game.turn);
                 played = true;
             }
         }
         ImGui::PopStyleColor(4);
-
+        //ImGui::BeginChild("Actions");
         // Swap with another player's swapCard
         if (isCurrentPlayer && !justShow && !player.swappedThisTurn && player.coins > 0) {
             ImGui::SameLine();
@@ -1369,7 +1387,8 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                         player.coins--; // Deduct one coin for the swap
                         coinsInTreasury++;
                         player.swappedThisTurn = true;
-                        std::cout << "Player " << player.name << " swapped their swap card with " << otherPlayer.name << "\n";
+                        PLOG( "Player " << player.name << " swapped their swap card with " << otherPlayer.name << "");
+                        PLOG_FLUSH(player.name, game.turn);
                         ImGui::CloseCurrentPopup();
                         break;
                     }
@@ -1380,7 +1399,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
 
         if (!played && isCurrentPlayer && !handCompleted) {
 
-            ImGui::SameLine();
+            //ImGui::SameLine();
 
             if ((automove && !player.control) || ImGui::Button("Auto Play##auto_move", ImVec2(200, 40))) {
 
@@ -1400,34 +1419,39 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                         player.hand.erase(it);
                     }
 
-                    std::cout << "Player " << player.name << " auto-played " << bestCard.value
-                        << " of " << bestCard.suit << "\n";
-
+                    PLOG( "Player " << player.name << " auto-played " << bestCard.value
+                        << " of " << bestCard.suit << "");
+                    PLOG_FLUSH(player.name, game.turn);
                     played = true;
                 }
             }
             ImGui::SameLine();
             ImGui::Checkbox(std::format("Control##control{}", player.name).c_str(), &player.control);
         }
+        //ImGui::EndChild();
     }
-    if (ImPlot::BeginPlot(("Player Progress##" + player.name).c_str(), ImVec2(-1, 180))) {
-        // Auto-fit X-Axis, but set Y-Axis to include negative values
-        ImPlot::SetupAxes("Hands", "Points / Coins", ImPlotAxisFlags_AutoFit, 0);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, -15, 35);  // Set Y-Axis limits to include negative values
+    ImGui::Separator();
+    if (ImGui::TreeNode(("Player Progress##" + player.name).c_str()))
+    {
+        if (ImPlot::BeginPlot(("Player Progress##" + player.name).c_str(), ImVec2(-1, 180))) {
+            // Auto-fit X-Axis, but set Y-Axis to include negative values
+            ImPlot::SetupAxes("Hands", "Points / Coins", ImPlotAxisFlags_AutoFit, 0);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, -15, 35);  // Set Y-Axis limits to include negative values
 
-        // Prepare data for plotting
-        std::vector<int> hands(player.pointsHistory.size());
-        std::iota(hands.begin(), hands.end(), 1);  // Hands: [1, 2, 3, ...]
+            // Prepare data for plotting
+                std::vector<int> hands(player.pointsHistory.size());
+                std::iota(hands.begin(), hands.end(), 1);  // Hands: [1, 2, 3, ...]
 
-        // Plot points
-        ImPlot::PlotLine(("Points##" + player.name).c_str(), hands.data(), player.pointsHistory.data(), player.pointsHistory.size());
+                // Plot points
+                ImPlot::PlotLine(("Points##" + player.name).c_str(), hands.data(), player.pointsHistory.data(), player.pointsHistory.size());
 
-        // Plot coins
-        ImPlot::PlotLine(("Coins##" + player.name).c_str(), hands.data(), player.coinsHistory.data(), player.coinsHistory.size());
+            // Plot coins
+            ImPlot::PlotLine(("Coins##" + player.name).c_str(), hands.data(), player.coinsHistory.data(), player.coinsHistory.size());
 
-        ImPlot::EndPlot();
+            ImPlot::EndPlot();
+        }
+        ImGui::TreePop();
     }
-    
     ImGui::End();
 
     // Reset swappedThisTurn at the end of the player's turn
@@ -1460,7 +1484,8 @@ void saveCardValues(const std::string& filename, const CardValues& cardValues) {
 void loadCardValues(const std::string& filename, CardValues& cardValues) {
     std::ifstream file(filename);
     if (!file.is_open()) {
-        std::cerr << "Error: Could not open file " << filename << std::endl;
+        PLOG_ERR( "Error: Could not open file " << filename );
+        PLOG_ERR_FLUSH("Error", 0);
         return;
     }
 
@@ -1548,7 +1573,8 @@ void renderCardValueManagementPanel(CardValues& cardValues, const std::string& d
             configFiles = getConfigFiles(directoryPath); // Aggiorna l'elenco
         }
         catch (const std::filesystem::filesystem_error& e) {
-            std::cerr << "Failed to delete file: " << e.what() << std::endl;
+            PLOG_ERR( "Failed to delete file: " << e.what() );
+            PLOG_ERR_FLUSH("Error", 0);
         }
     }
 
@@ -1625,8 +1651,8 @@ std:string suitToFollow;
 
     // Assign all played cards to the winner's wonCards
     if (!winnerName.empty()) {
-        std::cout << winnerName << " won the hand!\n";
-
+        PLOG( winnerName << " won the hand!");
+        PLOG_FLUSH(winnerName, game.turn);
         winner = *std::find_if(players.begin(), players.end(),
             [&](const Player& p) { return p.name == winnerName; });
 
@@ -1893,7 +1919,8 @@ void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std
         assignCardValues(deck, cardValues);
         updatePlayerHandValues(players, cardValues); // Update the values in the hands of players
         valuesChanged = false; // Reset after the update
-        std::cout << "Card values updated!" << std::endl;
+        PLOG("Card values updated!");
+        PLOG_FLUSH(players[0].name, game.turn);
     }
 
     ImGui::End();
@@ -1932,7 +1959,8 @@ void renderGamePanel(bool& gameStarted) {
 void setRandomSeed(unsigned int seed) {
     randomSeed = seed;
     randomGenerator.seed(seed); // Imposta il seed
-    std::cout << "Random seed set to: " << seed << "\n";
+    PLOG( "Random seed set to: " << seed << "");
+    PLOG_FLUSH(game.players[0].name, game.turn);
 }
 int getPlayerIndexByName(const std::vector<Player>& players, const std::string& name) {
     for (size_t i = 0; i < players.size(); ++i) {

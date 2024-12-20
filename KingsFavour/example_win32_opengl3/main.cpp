@@ -97,6 +97,8 @@ struct Player {
     int coins = 1; // Starting coins
     int points = 0; // Points accumulated
     int missions = 1; // Missions completed
+    int score = 0;
+    int turnWin = 0;
     std::vector<Card> hand; // Cards in hand
     std::vector<Card> wonCards; // Cards won by the player
     Card swapCard;
@@ -214,6 +216,9 @@ struct Game {
     bool collectAtTheEnd = false;
     bool collectEndTurn = false;
     bool collectGap = false;
+    bool collectPureHand = false;
+    bool collectWinBetray = false;
+
     int initialCoins = 1;
 
     // Funzione per resettare lo stato del gioco
@@ -282,7 +287,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
 void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std::vector<Player>& players);
 void renderCardValueManagementPanel(CardValues& cardValues, const std::string& directoryPath, std::string& selectedFile);
 void renderFinalWinnerPanel(const Player& winner, const std::vector<Player>& players);
-void renderGamePanel(bool& gameStarted);
+void renderGamePanel(bool& gameStarted, bool autoRestart);
 
 
 int getPlayerIndexByName(const std::vector<Player>& players, const std::string& name);
@@ -290,8 +295,12 @@ int getPlayerIndexByName(const std::vector<Player>& players, const std::string& 
 void renderGameboardPanel(const playedCardsType& playedCards, bool& automove, bool& autoplay, bool& automatch, bool handCompleted);
 bool restartGame(std::vector<Player>& players, std::vector<Card>& deck, bool& gameStarted);
 
+bool CollectCoins(Player& winningPlayer);
+
 
 void initializeGame(Game& game) {
+
+    playerProgression.clear();
 
     //game.randomSeed = seed;
     randomGenerator.seed(game.randomSeed);
@@ -331,9 +340,10 @@ void initializeGame(Game& game) {
     game.coinsInTreasury = game.maxCoinsInTreasury;
     for (auto& player : game.players) {
         player.coins = game.initialCoins;
-        game.maxCoinsInTreasury -= game.initialCoins;
+        game.coinsInTreasury -= game.initialCoins;
     }
-   
+
+
     
 }
 //------------------------------------------------------------------------------------
@@ -417,7 +427,8 @@ int main() {
     bool automove = false;
     bool autoplay = false;
     bool autoMatch = false;
-
+    bool autoRestart = false;
+    bool autoSeed = false;
 
     int currentPlayerIndex = 0;
     std::string currentPlayer = game.players[currentPlayerIndex].name;
@@ -455,7 +466,7 @@ int main() {
 
 
         renderValueConfigPanel(cardValues, game.deck, game.players);
-        renderGamePanel(game.isStarted);
+        renderGamePanel(game.isStarted, autoRestart);
 
         renderPlayerProgressionPanelByTurn(game.players.size());
 
@@ -505,12 +516,21 @@ int main() {
                 ImGui::Text("End of the game!");
                 ImGui::End();
 
+                for (auto& player : game.players)
+                {
+                    player.score = player.points + player.coins;
+                }
                 Player finalWinner = determineFinalWinner(game.players);
                 renderFinalWinnerPanel(finalWinner, game.players);
 
                 ImGui::Begin("GameBoard Panel");
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 1.0f, 0.5f, 0.4f, 1.0f });
                 if (ImGui::Button("Restart"))
                 {
+                    if (autoSeed) {
+                        unsigned int newSeed = std::random_device{}();
+                        setRandomSeed(newSeed);
+                    }
                     game.isStarted = false;
                     restartGame(game.players, game.deck, game.isStarted);
                     initializeGame(game); // Usa un seed definito
@@ -525,10 +545,38 @@ int main() {
                     automove = false;
                     autoplay = false;
                     autoMatch = false;
-
+                    autoRestart = false;
+                    currentPlayerIndex = 0;
+                    currentPlayer = game.players[currentPlayerIndex].name;
+                    autoSeed = false;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Auto-Restart"))
+                {
+                    
+                    if (autoSeed) {
+                        unsigned int newSeed = std::random_device{}();
+                        setRandomSeed(newSeed);
+                    }
+                    game.isStarted = false;
+                    restartGame(game.players, game.deck, game.isStarted);
+                    initializeGame(game); // Usa un seed definito
+                    // Assign values to the deck
+                    assignCardValues(game.deck, cardValues);
+                    handCount = 0; // Track the number of hands played
+                    handCompleted = false;
+                    withWinner = false;
+                    isLastHand = false;
+                    bool isLastRound = false;
+                    autoMatch = true;
+                    autoRestart = true;
                     currentPlayerIndex = 0;
                     currentPlayer = game.players[currentPlayerIndex].name;
                 }
+                ImGui::SameLine();
+                ImGui::Checkbox("Change Seed", &autoSeed);
+
+                ImGui::PopStyleColor(1);
                 ImGui::End();
             }
             else {
@@ -545,27 +593,10 @@ int main() {
                                     [&](const Player& p) { return p.name == game.winner.name; });
 
                                 winningPlayer.wonCards = game.winner.wonCards;
+                                winningPlayer.turnWin++;
                                 CalculateScore(game.playedCards, winningPlayer, cardValues);
 
-                                // Assign end of round coins if available
-                                if (game.coinsInTreasury > 0)
-                                {
-                                    if (!game.collectGap || (game.collectGap && winningPlayer.coins < 3))
-                                    {
-                                        if (game.collectEndTurn)
-                                        {
-                                            winningPlayer.coins++;
-                                            game.coinsInTreasury--;
-                                        }
-                                        else {
-                                            bool pureHand = (checkGameRoundPlayedDeck("Parliament") + checkGameRoundPlayedDeck("Betrays") + checkGameRoundPlayedDeck("Guard") == 0);
-                                            if (pureHand) {
-                                                winningPlayer.coins++;
-                                                game.coinsInTreasury--;
-                                            }
-                                        }
-                                    }
-                                }
+                                CollectCoins(winningPlayer);
                                 PLOG( game.winner.name << " wins the hand and now has "
                                     << winningPlayer.points << " points and "
                                     << winningPlayer.coins << " coins.");
@@ -652,13 +683,41 @@ int main() {
             ImGui::InputInt("Treasury Coins available", &game.maxCoinsInTreasury);
             ImGui::InputInt("Initial Players Coins", &game.initialCoins);
             ImGui::PopItemWidth();
-            ImGui::Checkbox("Collect all at the end", &game.collectAtTheEnd);
-            ImGui::Checkbox("Collect every turn/pure hand", &game.collectEndTurn);
+            ImGui::Checkbox("Collect all at the end", &game.collectAtTheEnd); 
+            ImGui::Checkbox("Collect every turn", &game.collectEndTurn);
+            ImGui::Checkbox("Collect pure hand", &game.collectPureHand);
+            ImGui::Checkbox("Collect if betrays", &game.collectWinBetray);
             ImGui::Checkbox("Collect max 3", &game.collectGap);
 
             if (ImGui::Button("Restore"))
             {
                 game.restore();
+            }
+        }
+        else
+        {
+            ImGui::Separator();
+            if (ImGui::Button("Restart"))
+            {
+                game.isStarted = false;
+                restartGame(game.players, game.deck, game.isStarted);
+                initializeGame(game); // Usa un seed definito
+                // Assign values to the deck
+                assignCardValues(game.deck, cardValues);
+
+                currentPlayerIndex = 0;
+                currentPlayer = game.players[currentPlayerIndex].name;
+                handCount = 0; // Track the number of hands played
+                handCompleted = false;
+                withWinner = false;
+                isLastHand = false;
+                bool isLastRound = false;
+
+                //bool isGameOver = false;
+                automove = false;
+                autoplay = false;
+                autoMatch = false;
+                
             }
         }
         ImGui::Separator();
@@ -701,6 +760,7 @@ int main() {
 
     return 0;
 }
+
 
 //------------------------------------------------------------------------------------
 
@@ -849,6 +909,47 @@ void ShowAutoPlayControls(bool& autoplay, bool& automove, bool& autoMatch)
     ImGui::End();
 }
 
+bool CollectCoins(Player& winningPlayer)
+{
+    // Assign end of round coins if available
+    if (game.coinsInTreasury <= 0)
+        return false;
+
+    if (game.collectGap && winningPlayer.coins >= 3)
+        return false;
+
+    auto tempWinningPlayerCoins = winningPlayer.coins;
+    auto tempGameCoinsInTreasury= game.coinsInTreasury;
+
+    if (game.collectEndTurn)
+    {
+        winningPlayer.coins++;
+        game.coinsInTreasury--;
+        return true;
+    }
+    if (game.collectPureHand)
+    {
+        bool pureHand = (checkGameRoundPlayedDeck("Parliament") + checkGameRoundPlayedDeck("Betrays") + checkGameRoundPlayedDeck("Guard") == 0);
+        if (pureHand) {
+            winningPlayer.coins++;
+            game.coinsInTreasury--;
+            return true;
+        }
+        return false;
+    }
+
+    if (game.collectWinBetray)
+    {
+        bool hasBetrayals = checkGameRoundPlayedDeck("Betrays") != 0;
+        if (hasBetrayals) {
+            winningPlayer.coins++;
+            game.coinsInTreasury--;
+            return true;
+        }
+    }
+
+    return false;
+}
 
 
 // Function to shuffle the deck
@@ -1205,6 +1306,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
     ImGui::Begin(("Player " + player.name).c_str(), &p_open, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Coins: %d", player.coins);
     ImGui::Text("Points: %d(%+d)", player.points, player.points - player.lastScore);
+    ImGui::Text("Score: %d", player.score);
     ImGui::SameLine();  ImGui::Text(std::format("    {}:{} {}:{} {}:{}", ICON_FA_BUILDING_COLUMNS, player.parliaments, ICON_FA_CIRCLE_PLUS, player.goodPoints, ICON_FA_CIRCLE_MINUS, player.negativePoints).c_str());
     ImGui::Text("Missions: %d", player.missions);
 
@@ -1431,9 +1533,9 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
         //ImGui::EndChild();
     }
     ImGui::Separator();
-    if (ImGui::TreeNode(("Player Progress##" + player.name).c_str()))
+    if (ImGui::CollapsingHeader(("Player Progress##" + player.name).c_str()))
     {
-        if (ImPlot::BeginPlot(("Player Progress##" + player.name).c_str(), ImVec2(-1, 180))) {
+        if (ImPlot::BeginPlot(("Player Progress##plot" + player.name).c_str(), ImVec2(-1, 180))) {
             // Auto-fit X-Axis, but set Y-Axis to include negative values
             ImPlot::SetupAxes("Hands", "Points / Coins", ImPlotAxisFlags_AutoFit, 0);
             ImPlot::SetupAxisLimits(ImAxis_Y1, -15, 35);  // Set Y-Axis limits to include negative values
@@ -1450,7 +1552,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
 
             ImPlot::EndPlot();
         }
-        ImGui::TreePop();
+       // ImGui::TreePop();
     }
     ImGui::End();
 
@@ -1726,9 +1828,11 @@ void CalculateScore(playedCardsType& playedCards, Player& player, const CardValu
 {
     player.lastScore = player.points;
     player.points = 0;
+    player.score = 0;
     player.goodPoints = 0;
     player.negativePoints = 0;
     player.parliaments = 0;
+
     int parliamentCount = 0;
 
     for (auto card : player.wonCards)
@@ -1925,7 +2029,7 @@ void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std
 
     ImGui::End();
 }
-void renderGamePanel(bool& gameStarted) {
+void renderGamePanel(bool& gameStarted, bool autoRestart) {
 
     ImGui::Begin("Seed Configuration");
     ImGui::Text("Configure Random Seed:");
@@ -1935,13 +2039,67 @@ void renderGamePanel(bool& gameStarted) {
     if (ImGui::Button("Apply Seed")) {
         setRandomSeed(game.randomSeed); // Applica il nuovo seed
     }
+    const char* items[4] = { "Player1", "Player2", "Player3", "Player4" };
+    // Anna:
+    // 2824091215 - 28
+    // 401942501 - 27
+    // 2160288740 - 27
+    // 979825834 - 23
+    // 1170028099 - 23
+    // 
+    // Bob:
+    // 4174245972 - 32
+    // 1420861288 - 31
+    // 2506839946 - 29
+    // 1232918875 - 29
+    // 121576022 - 29
+    // 351025960 - 28
+    // 1701617096 - 27
+    // 1346488085 - 25
+    // 1768631749 - 23
+    // 2003542799 - 21
+    // 994152065 - 19
+    // 
+    // Charlie:
+    // 3563633078 - 28
+    // 1636843424 - 25
+    // 2259934782 - 27
+    // 2162218591 - 24
+    // 721758050 - 22
+    // 18925438 - 34
+    // Diana:
+    // 0 - 29
+    // 3672473459 - 28
+    // 2065156 - 23
+    // 3981382579 - 22
+    //
+    const unsigned int seeds[4] = { 1296989444, 265059678,3492052254,0 };
+ 
+    static int item_selected_idx = 0; // Here we store our selection data as an index.
+
+    const char* combo_preview_value = items[item_selected_idx];
+    if (ImGui::BeginCombo("Select Seed", combo_preview_value))
+    {
+        for (int n = 0; n < IM_ARRAYSIZE(items); n++)
+        {
+            const bool is_selected = (item_selected_idx == n);
+            if (ImGui::Selectable(items[n], is_selected))
+                item_selected_idx = n;
+
+            // Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
+            if (is_selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        unsigned int newSeed = seeds[item_selected_idx];
+        setRandomSeed(newSeed);
+        ImGui::EndCombo();
+    }
 
     // Pulsante per generare un seed casuale basato sul tempo
     if (ImGui::Button("Generate Random Seed")) {
         unsigned int newSeed = std::random_device{}();
         //int newSeed = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
         setRandomSeed(newSeed);
-        game.randomSeed = newSeed; // Aggiorna il valore visibile all'utente
     }
 
     ImGui::Text(std::format("Current Seed: {}", randomSeed).c_str());
@@ -1949,16 +2107,19 @@ void renderGamePanel(bool& gameStarted) {
     ImGui::Separator();
     if (!gameStarted)
     {
-        if (ImGui::Button("Start Game"))
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 1.0f, 0.5f, 0.4f, 1.0f });
+        if (ImGui::Button("Start Game")|| autoRestart)
         {
             gameStarted = true;
         }
+        ImGui::PopStyleColor(1);
     }
     ImGui::End();
 }
 void setRandomSeed(unsigned int seed) {
     randomSeed = seed;
     randomGenerator.seed(seed); // Imposta il seed
+    game.randomSeed = seed; // Aggiorna il valore visibile all'utente
     PLOG( "Random seed set to: " << seed << "");
     PLOG_FLUSH(game.players[0].name, game.turn);
 }
@@ -2002,13 +2163,22 @@ void renderFinalWinnerPanel(const Player& winner, const std::vector<Player>& pla
     ImGui::Begin("GameBoard Panel");
 
     ImGui::Text("The final winner is: %s", winner.name.c_str());
-    ImGui::Text("Score:%d - (Points: %d, Coins: %d)", winner.points + winner.coins, winner.points, winner.coins);
+    std::string color = "FFFFFFFF";
+    if (winner.score > 31) color = "00FFFFFF";
+    else if (winner.score > 21) color = "FFFF00FF";
+    ImGui::TextFormatted("Score:{%s}%d - (Points: %d, Coins: %d)", color.c_str(), winner.score,winner.points, winner.coins);
     ImGui::Separator();
-    for (const auto& player : players)
-    {
-        ImGui::Text("%s - Score: %d - (Points: %d, Coins: %d)", player.name.c_str(), player.points + player.coins, player.points, player.coins);
-    }
+    std::vector<Player> sortedPlayers = players;
 
+    // Ordina la copia in base al valore di points in ordine decrescente
+    std::sort(sortedPlayers.begin(), sortedPlayers.end(), [](const Player& a, const Player& b) {
+        return a.points > b.points; // Ordine decrescente
+        });
+    for ( auto& player : sortedPlayers)
+    {
+      ImGui::Text("%s - Score: %d - (Points: %d, Coins: %d) - Hands win: %d", player.name.c_str(), player.score, player.points, player.coins, player.turnWin);
+    }
+    ImGui::Separator();
     ImGui::End();
 }
 bool restartGame(std::vector<Player>& players, std::vector<Card>& deck, bool& gameStarted)

@@ -1,0 +1,24 @@
+{
+    "baseValues": [
+        1,
+        1,
+        1,
+        2,
+        3
+    ],
+    "betrayalValues": [
+        -2,
+        -1,
+        -1,
+        -1,
+        -1,
+        -2,
+        -2,
+        -3,
+        -3
+    ],
+    "coinValue": 2,
+    "guardValue": 3,
+    "parliamentNegative": -1,
+    "parliamentPositive": 3
+}

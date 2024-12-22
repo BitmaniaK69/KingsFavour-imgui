@@ -111,8 +111,10 @@
     <ClInclude Include="..\..\text_formatted\text_formatted.h">
       <Filter>text_formatted</Filter>
     </ClInclude>
-    <ClInclude Include="main.h" />
     <ClInclude Include="PlayerProgression.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="main.h">
       <Filter>sources</Filter>
     </ClInclude>
   </ItemGroup>

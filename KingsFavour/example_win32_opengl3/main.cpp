@@ -8,345 +8,10 @@
 
 // This is provided for completeness, however it is strongly recommended you use OpenGL with SDL or GLFW.
 
-#include "imgui.h"
-#include "implot.h"
-#include "IconsFontAwesome6.h"
-#include "fa.h"
-
-#include "imgui_impl_opengl3.h"
-#include "imgui_impl_win32.h"
-
-#include "text_formatted.h"
-
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#define NOMINMAX
-
-#include <windows.h>
-#include <GL/GL.h>
-#include <tchar.h>
-#include <vector>
-#include <map>
-#include <algorithm>
-//#include <format>
-
-#include <sstream>
-#include <string>
-#include <iostream>
-
-#include <functional>
-
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
-#include "json.hpp"
-#include <fstream>
-
-#include <filesystem>
-#include <random>
-#include <ctime>
-#include <utility>
-#include <limits>
-#include <cstdint> // uint_fast8_t
-#include <iomanip>
 #include "main.h"
-#include "PlayerProgression.h"
-
-// ImGui and GLFW
-//#include "imgui_impl_glfw.h"
-//#include <GLFW/glfw3.h>
-
 
 using namespace std;
 using json = nlohmann::json;
-
-// Data stored per platform window
-struct WGL_WindowData { HDC hDC; };
-
-// Data
-static HGLRC            g_hRC;
-static WGL_WindowData   g_MainWindow;
-static int              g_Width;
-static int              g_Height;
-
-// Forward declarations of helper functions
-bool CreateDeviceWGL(HWND hWnd, WGL_WindowData* data);
-void ShowAutoPlayControls(bool& autoplay, bool& automove, bool& autoMatch);
-void CleanupDeviceWGL(HWND hWnd, WGL_WindowData* data);
-void ResetDeviceWGL();
-LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-// Windows specific functions (for window creation and message handling)
-
-//***********************************************
-ImVec4 clear_color = ImVec4(0, 0.0f / 255.0f, 19.0f / 255.0f, 1.00f);
-
-// Card structure to hold card details
-struct Card {
-    std::string value;
-    std::string suit;
-    int pointValue;
-    int order;
-};
-
-
-// Player structure to hold relevant details
-struct Player {
-    std::string name;
-    int coins = 1; // Starting coins
-    int points = 0; // Points accumulated
-    int missions = 1; // Missions completed
-    int score = 0;
-    int turnWin = 0;
-    std::vector<Card> hand; // Cards in hand
-    std::vector<Card> wonCards; // Cards won by the player
-    Card swapCard;
-    //stats
-    int lastScore = 0;
-    int goodPoints = 0;
-    int negativePoints = 0;
-    int parliaments = 0;
-    int swappedThisTurn = 0;
-    bool control = false;
-    int coinsCollected = 0;
-
-    std::vector<int> pointsHistory;
-    std::vector<int> coinsHistory;
-};
-
-struct CardValues {
-    int baseValues[5] = { +1, +2, +2, +3, +3 };       // Valori dei semi base (1,6,7,8,9)
-    int betrayalValues[9] = { -2, -1, -1, -1, -1, -1, -1, -2, -2 }; // Betrayal (1-9, 0)
-    int parliamentPositive = 3;               // Valore positivo per Parliament
-    int parliamentNegative = -1;              // Valore negativo per Parliament
-    int guardValue = 3;                       // Valore della Guardia
-    int coinValue = 1;                        // Valore della Moneta
-};
-
-using playedCardsType = std::vector<std::pair<std::string, Card>>;
-
-//--------------------------------------------------------------------------------------
-
-std::mt19937 randomGenerator; // Generatore di numeri casuali
-unsigned int randomSeed = 0; // Seed iniziale
-
-//------------------------------------------------------------------------------------
-//static thread_local std::mt19937 rng(std::random_device{}());
-static thread_local std::uniform_int_distribution<int> dist(1, 100);
-
-inline bool chance(uint_fast8_t percent) noexcept {
-    return dist(randomGenerator) <= percent;
-}
-GLuint LoadTexture(const char* filename, int& width, int& height) {
-    int channels;
-    unsigned char* data = stbi_load(filename, &width, &height, &channels, 4); // Load as RGBA
-
-    if (!data) {
-        PLOG_ERR( "Failed to load image: " << filename );
-        PLOG_ERR_FLUSH("Error", 0);
-        return 0;
-    }
-
-    GLuint textureID;
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    stbi_image_free(data);  // Free the image memory
-    return textureID;
-}
-
-
-void RenderBackgroundWithAspectRatio(GLuint textureID, int imgWidth, int imgHeight) {
-
-    ImVec2 windowPos = ImGui::GetMainViewport()->Pos;  // Position of the main viewport
-    ImVec2 windowSize = ImGui::GetMainViewport()->Size; // Size of the window
-
-    // Calculate the scaling factor to maintain aspect ratio
-    float windowAspect = windowSize.x / windowSize.y;
-    float imageAspect = (float)imgWidth / (float)imgHeight;
-
-    float scaleX = windowSize.x;
-    float scaleY = windowSize.y;
-
-    // Scale the image to fit the window while maintaining aspect ratio
-    if (imageAspect > windowAspect) {
-        // Image is wider than the window: scale based on width
-        scaleY = windowSize.x / imageAspect;
-    }
-    else {
-        // Image is taller than the window: scale based on height
-        scaleX = windowSize.y * imageAspect;
-    }
-
-    // Calculate the position for centering the image
-    ImVec2 imagePos = ImVec2(windowPos.x + (windowSize.x - scaleX) * 0.5f, windowPos.y + (windowSize.y - scaleY) * 0.5f);
-
-    // Get the ImDrawList for the background
-    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
-
-    // Draw the image with the calculated size and position
-    drawList->AddImage(
-        (ImTextureID)(intptr_t)textureID,                // Texture ID
-        imagePos,                                       // Top-left position
-        ImVec2(imagePos.x + scaleX, imagePos.y + scaleY) // Bottom-right position
-    );
-}
-//------------------------------------------------------------------------------------
-std::vector<Card> initializeDeck();
-void shuffleDeck(std::vector<Card>& deck);
-
-struct Game {
-    int coinsInTreasury = 12;
-    int maxCoinsInTreasury = 12;
-    std::vector<Player> players;
-    std::vector<Card> deck;
-    playedCardsType playedCards;
-    Player winner;
-
-    int round = 1;
-    int turn = 1;
-    unsigned int randomSeed = 0;
-    bool isGameOver = false;
-    bool isStarted = false;
-    bool collectAtTheEnd = false;
-    bool collectEndTurn = false;
-    bool collectGap = false;
-    bool collectPureHand = false;
-    bool collectWinBetray = false;
-
-    int initialCoins = 1;
-
-    // Funzione per resettare lo stato del gioco
-    void reset() {
-        isGameOver = false;
-        isStarted = false;
-        players.clear();
-        deck = initializeDeck();
-        playedCards.clear();
-        winner = Player();
-        randomGenerator.seed(randomSeed);
-        shuffleDeck(deck);
-        round = 1;
-        turn = 1;
-    }
-
-    void restore()
-    {
-        coinsInTreasury = 12;
-        maxCoinsInTreasury = 12;
-        collectAtTheEnd = false;
-        collectEndTurn = false;
-        collectGap = false;
-        initialCoins = 1;
-    }
-} game;
-
-void setRandomSeed(unsigned int seed);
-std::string iconify(const std::string& name);
-
-// Functions for initializing, shuffling, and dealing the deck
-void assignCardValues(std::vector<Card>& deck, const CardValues& cardValues);
-
-
-void dealToHands(std::vector<Player>& players, std::vector<Card>& deck);
-
-// Functions for playing and determining the winner of a hand
-Card chooseCardToPlay(Player& player, const std::string& suitToFollow);
-playedCardsType playHand(std::vector<Player>& players, const std::string& suitToFollow);
-std::string determineWinner(const playedCardsType& playedCards, const std::string& suitToFollow);
-
-// Function to handle player swapping cards
-void playerRandomSwap(std::vector<Player>& players, int& coinsInTreasury);
-
-// Helper function to get the color corresponding to the suit (For UI)
-ImVec4 getSuitColor(const std::string& suit);
-std::string getSuitColorString(const std::string& suit);
-
-// Function to determine the winner of the hand and update the winner hand, managing also special cases (Parliament, guard)
-bool determineWinnerAndResetHand(playedCardsType& playedCards, std::vector<Player>& players, int& coinsInTreasury, bool isLastHand, Player& winner);
-
-void CalculateScore(playedCardsType& playedCards, Player& player, const CardValues& cardValues);
-int CalculatePScore(playedCardsType& playedCards, const CardValues& cardValues);
-Player determineFinalWinner(const std::vector<Player>& players);
-
-void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck);
-void updatePlayerHandValues(std::vector<Player>& players, const CardValues& cardValues);
-
-int checkMemoryDeck(const Player& player, const std::string& suitToFollow);
-int checkPlayerHand(const Player& player, const std::string& suitToFollow);
-int checkGameRoundPlayedDeck(const std::string& suitToFollow);
-int checkGameRemainigDeck(const std::string& suitToFollow);
-
-// UI Rendering Functions
-bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::string& currentPlayer, bool justShow, bool& automove, std::vector<Player>& allPlayers, int& coinsInTreasury, const std::string& suitToFollow, bool handCompleted, const CardValues& cardValues);
-void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std::vector<Player>& players);
-void renderCardValueManagementPanel(CardValues& cardValues, const std::string& directoryPath, std::string& selectedFile);
-void renderFinalWinnerPanel(const Player& winner, const std::vector<Player>& players);
-void renderGamePanel(bool& gameStarted, bool autoRestart);
-
-
-int getPlayerIndexByName(const std::vector<Player>& players, const std::string& name);
-
-void renderGameboardPanel(const playedCardsType& playedCards, bool& automove, bool& autoplay, bool& automatch, bool handCompleted);
-bool restartGame(std::vector<Player>& players, std::vector<Card>& deck, bool& gameStarted);
-
-bool CollectCoins(Player& winningPlayer);
-
-
-void initializeGame(Game& game) {
-
-    playerProgression.clear();
-
-    //game.randomSeed = seed;
-    randomGenerator.seed(game.randomSeed);
-    game.reset();
-
-    // Inizializza i giocatori
-    game.players = { {"Anna"}, {"Bob"}, {"Charlie"}, {"Diana"} };
-
-    shuffleDeck(game.deck);
-
-    // Distribuisci le carte ai giocatori
-    for (auto& player : game.players) {
-        for (int i = 0; i < 4; ++i) {
-            if (!game.deck.empty()) {
-                player.hand.push_back(game.deck.back());
-                game.deck.pop_back();
-            }
-        }
-    }
-
-    for (auto& player : game.players) {
-        if (!game.deck.empty()) {
-            // Assign the top card of the deck as the swapCard
-            player.swapCard = game.deck.back();
-            game.deck.pop_back(); // Remove the card from the deck
-
-            PLOG("Assigned swapCard to " << player.name << ": "
-                << player.swapCard.value << " of " << player.swapCard.suit );
-            PLOG_FLUSH(player.name, game.turn);
-            
-        }
-        else {
-             PLOG_ERR("Deck is empty! Cannot assign swapCard to " << player.name );
-             PLOG_ERR_FLUSH(player.name, game.turn);
-        }
-    }
-    game.coinsInTreasury = game.maxCoinsInTreasury;
-    for (auto& player : game.players) {
-        player.coins = game.initialCoins;
-        game.coinsInTreasury -= game.initialCoins;
-    }
-
-
-    
-}
-//------------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------------
 // MAIN
@@ -600,7 +265,7 @@ int main() {
                                 PLOG( game.winner.name << " wins the hand and now has "
                                     << winningPlayer.points << " points and "
                                     << winningPlayer.coins << " coins.");
-                                PLOG_FLUSH(game.winner.name, game.turn);
+                                PLOG_FLUSH(game.winner.name, game.turn, game.round);
                                 // There is a winner
                                 handCompleted = true;
                                 withWinner = true;
@@ -624,7 +289,7 @@ int main() {
                             currentPlayer = game.winner.name;
 
                             // If last hand, winner collects all remaining coins
-                            if (isLastRound) {
+                            /*if (isLastRound) {
                                 auto& winningPlayer = *std::find_if(game.players.begin(), game.players.end(),
                                     [&](const Player& p) { return p.name == game.winner.name; });
 
@@ -633,11 +298,11 @@ int main() {
                                     winningPlayer.coinsCollected = game.coinsInTreasury;
                                     winningPlayer.coins += game.coinsInTreasury;
                                     PLOG( game.winner.name << " collects the remaining treasury coins!");
-                                    PLOG_FLUSH(game.winner.name, game.turn);
+                                    PLOG_FLUSH(game.winner.name, game.turn, game.round);
                                     ImGui::Text(std::format("{} collected {} remaining treasury coins!", game.winner.name, game.coinsInTreasury).c_str());
                                     game.coinsInTreasury = 0;
                                 }
-                            }
+                            }*/
                             // Clear playedCards for the next hand
                             game.playedCards.clear();
 
@@ -645,10 +310,22 @@ int main() {
                             if (isLastHand) {
                                 if (!isLastRound) {
                                     game.round++;
-                                    game.turn = 1;
+                                    game.turn = 0;
                                     dealNewCards(game.players, game.deck);
                                 }
                                 else {
+                                    if (game.collectAtTheEnd)
+                                    {
+                                        auto& winningPlayer = *std::find_if(game.players.begin(), game.players.end(),
+                                            [&](const Player& p) { return p.name == game.winner.name; });
+
+                                        winningPlayer.coinsCollected = game.coinsInTreasury;
+                                        winningPlayer.coins += game.coinsInTreasury;
+                                        PLOG(game.winner.name << " collects the remaining treasury coins!");
+                                        PLOG_FLUSH(game.winner.name, game.turn, game.round);
+                                        ImGui::Text(std::format("{} collected {} remaining treasury coins!", game.winner.name, game.coinsInTreasury).c_str());
+                                        game.coinsInTreasury = 0;
+                                    }
                                     game.isGameOver = true;
                                 }
                             }
@@ -688,6 +365,8 @@ int main() {
             ImGui::Checkbox("Collect pure hand", &game.collectPureHand);
             ImGui::Checkbox("Collect if betrays", &game.collectWinBetray);
             ImGui::Checkbox("Collect max 3", &game.collectGap);
+            ImGui::Checkbox("Collect when Parliament", &game.collectParliament);
+            
 
             if (ImGui::Button("Restore"))
             {
@@ -989,7 +668,7 @@ playedCardsType playHand(std::vector<Player>& players, const std::string& suitTo
         Card playedCard = chooseCardToPlay(player, suitToFollow);
         playedCards.push_back({ player.name, playedCard }); // Append to the vector
         PLOG( player.name << " plays " << playedCard.value << " of " << playedCard.suit );
-            PLOG_FLUSH(player.name, game.turn);
+        PLOG_FLUSH(player.name, game.turn, game.round);
     }
     return playedCards;
 }
@@ -1038,14 +717,14 @@ void playerRandomSwap(std::vector<Player>& players, int& coinsInTreasury) {
         players[0].coins--;
         coinsInTreasury++;
         PLOG( players[0].name << " pays 1 coin to swap a card.");
-        PLOG_FLUSH(players[0].name, game.turn);
+        PLOG_FLUSH(players[0].name, game.turn, game.round);
     }
 }
 
 void dealNewCards(std::vector<Player>& players, std::vector<Card>& deck)
 {
     PLOG( "Dealing new cards for the next round...");
-    PLOG_FLUSH(players[0].name, game.turn);
+    PLOG_FLUSH("GAME", game.turn, game.round);
     for (auto& player : players) {
         player.hand.clear();
         for (int i = 0; i < 4; ++i) // Cards in hand = 4
@@ -1370,25 +1049,34 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
             ImGui::PushStyleColor(ImGuiCol_Text, invisible);
             buttonText = "Hidden Card";
         }
-
+        // Play the card
         if (ImGui::Button((buttonText + "##" + std::to_string(i)).c_str(), ImVec2(90, 60))) {
             if (isCurrentPlayer && !justShow) {
                 auto& bestCard = player.hand[i];
                 playedCards.push_back({ player.name, bestCard });
+                if (game.collectParliament && game.coinsInTreasury > 0 && bestCard.suit == "Parliament")
+                {
+                    player.coins++;
+                    PLOG("Player " << player.name << " collected 1 coin for Parliament");
+                    PLOG_FLUSH(player.name, game.turn, game.round);
 
+                }
                 auto it = std::find_if(player.hand.begin(), player.hand.end(),
                     [&bestCard](const Card& card) {
                         return card.value == bestCard.value && card.suit == bestCard.suit;
                     });
+
                 if (it != player.hand.end()) {
                     player.hand.erase(it);
                 }
-                else
-                {
-                    PLOG( "Player " << player.name << " played " << playedCards.back().second.value
-                        << " of " << playedCards.back().second.suit << "");
-                    PLOG_FLUSH(player.name, game.turn);
-                }
+                
+
+                PLOG("Player " << player.name << " played " << playedCards.back().second.value
+                    << " of " << playedCards.back().second.suit << "");
+                PLOG_FLUSH(player.name, game.turn, game.round);
+
+
+
                 played = true;
                 ImGui::PopStyleColor(4);
                 break;
@@ -1418,7 +1106,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
 
                     PLOG( "Player " << player.name << " swapped hand card " << player.hand[i].value
                         << " with their swap card " << player.swapCard.value << "");
-                    PLOG_FLUSH(player.name, game.turn);
+                    PLOG_FLUSH(player.name, game.turn, game.round);
                     // Ensure the colors update correctly (force re-rendering with updated data)
                     ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.hand[i].suit));
                     ImGui::PopStyleColor();
@@ -1467,7 +1155,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                 player.hand.erase(player.hand.begin() + (player.swappedThisTurn - 1));
                 PLOG( "Player " << player.name << " swap-played " << playedCards.back().second.value
                     << " of " << playedCards.back().second.suit << "");
-                PLOG_FLUSH(player.name, game.turn);
+                PLOG_FLUSH(player.name, game.turn, game.round);
                 played = true;
             }
         }
@@ -1490,7 +1178,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
                         coinsInTreasury++;
                         player.swappedThisTurn = true;
                         PLOG( "Player " << player.name << " swapped their swap card with " << otherPlayer.name << "");
-                        PLOG_FLUSH(player.name, game.turn);
+                        PLOG_FLUSH(player.name, game.turn, game.round);
                         ImGui::CloseCurrentPopup();
                         break;
                     }
@@ -1523,7 +1211,14 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
 
                     PLOG( "Player " << player.name << " auto-played " << bestCard.value
                         << " of " << bestCard.suit << "");
-                    PLOG_FLUSH(player.name, game.turn);
+                    PLOG_FLUSH(player.name, game.turn, game.round);
+
+                    if ((game.collectParliament && game.coinsInTreasury > 0) && bestCard.suit == "Parliament")
+                    {
+                        player.coins++;
+                        PLOG("Player " << player.name << " collected 1 coin for Parliament");
+                        PLOG_FLUSH(player.name, game.turn, game.round);
+                    }
                     played = true;
                 }
             }
@@ -1587,7 +1282,7 @@ void loadCardValues(const std::string& filename, CardValues& cardValues) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         PLOG_ERR( "Error: Could not open file " << filename );
-        PLOG_ERR_FLUSH("Error", 0);
+        PLOG_ERR_FLUSH("Error", 0,0);
         return;
     }
 
@@ -1676,7 +1371,7 @@ void renderCardValueManagementPanel(CardValues& cardValues, const std::string& d
         }
         catch (const std::filesystem::filesystem_error& e) {
             PLOG_ERR( "Failed to delete file: " << e.what() );
-            PLOG_ERR_FLUSH("Error", 0);
+            PLOG_ERR_FLUSH("Error", 0,0);
         }
     }
 
@@ -1754,7 +1449,7 @@ std:string suitToFollow;
     // Assign all played cards to the winner's wonCards
     if (!winnerName.empty()) {
         PLOG( winnerName << " won the hand!");
-        PLOG_FLUSH(winnerName, game.turn);
+        PLOG_FLUSH(winnerName, game.turn, game.round);
         winner = *std::find_if(players.begin(), players.end(),
             [&](const Player& p) { return p.name == winnerName; });
 
@@ -1935,7 +1630,7 @@ void updatePlayerHandValues(std::vector<Player>& players, const CardValues& card
 }
 
 void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std::vector<Player>& players) {
-    ImGui::Begin("Card Values Configuration");
+    ImGui::Begin("Card Values Config");
 
     static bool valuesChanged = false; // Traccia se ci sono cambiamenti
     /* { "Crowns", ICON_FA_CROWN },
@@ -1947,7 +1642,7 @@ void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std
  { "Parliament", ICON_FA_BUILDING_COLUMNS }*/
 
  // Configuration of the values of the base cards
-    static std::string frmtxt = std::format("Base Suit Values {}{} {}{} {}{} {}{}{}:\n", getSuitColorString("Crowns"), ICON_FA_CROWN, getSuitColorString("Weapons"), ICON_FA_TROWEL, getSuitColorString("Faith"), ICON_FA_CROSS, getSuitColorString("Diamonds"), ICON_FA_GEM, "{FFFFFFFF}");
+    static std::string frmtxt = std::format("Base Suit Values\n{}{} {}{} {}{} {}{}{}:\n", getSuitColorString("Crowns"), ICON_FA_CROWN, getSuitColorString("Weapons"), ICON_FA_TROWEL, getSuitColorString("Faith"), ICON_FA_CROSS, getSuitColorString("Diamonds"), ICON_FA_GEM, "{FFFFFFFF}");
     ImGui::TextFormatted(frmtxt.c_str());
     // ImGui::TextFormatted("Base Suit Values{FF0000FF}rosso{FFFFFFFF} e poi normale{00FF00}verde{FFFFFF}\n");
     static std::vector<std::string>ids = { "A", "6", "7", "8", "9" };
@@ -2024,7 +1719,7 @@ void renderValueConfigPanel(CardValues& cardValues, std::vector<Card>& deck, std
         updatePlayerHandValues(players, cardValues); // Update the values in the hands of players
         valuesChanged = false; // Reset after the update
         PLOG("Card values updated!");
-        PLOG_FLUSH(players[0].name, game.turn);
+        PLOG_FLUSH("GAME", game.turn, game.round);
     }
 
     ImGui::End();
@@ -2073,7 +1768,7 @@ void renderGamePanel(bool& gameStarted, bool autoRestart) {
     // 2065156 - 23
     // 3981382579 - 22
     //
-    const unsigned int seeds[4] = { 1296989444, 265059678,3492052254,0 };
+    const unsigned int seeds[4] = { 1296989444, 265059678,3492052254,3672473459 };
  
     static int item_selected_idx = 0; // Here we store our selection data as an index.
 
@@ -2084,14 +1779,15 @@ void renderGamePanel(bool& gameStarted, bool autoRestart) {
         {
             const bool is_selected = (item_selected_idx == n);
             if (ImGui::Selectable(items[n], is_selected))
+            {
                 item_selected_idx = n;
-
+                unsigned int newSeed = seeds[item_selected_idx];
+                setRandomSeed(newSeed);
+            }
             // Set the initial focus when opening the combo (scrolling + keyboard navigation focus)
             if (is_selected)
                 ImGui::SetItemDefaultFocus();
         }
-        unsigned int newSeed = seeds[item_selected_idx];
-        setRandomSeed(newSeed);
         ImGui::EndCombo();
     }
 
@@ -2110,7 +1806,7 @@ void renderGamePanel(bool& gameStarted, bool autoRestart) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{ 1.0f, 0.5f, 0.4f, 1.0f });
         if (ImGui::Button("Start Game")|| autoRestart)
         {
-            gameStarted = true;
+            gameStart();
         }
         ImGui::PopStyleColor(1);
     }
@@ -2121,7 +1817,7 @@ void setRandomSeed(unsigned int seed) {
     randomGenerator.seed(seed); // Imposta il seed
     game.randomSeed = seed; // Aggiorna il valore visibile all'utente
     PLOG( "Random seed set to: " << seed << "");
-    PLOG_FLUSH(game.players[0].name, game.turn);
+    PLOG_FLUSH("GAME", game.turn, game.round);
 }
 int getPlayerIndexByName(const std::vector<Player>& players, const std::string& name) {
     for (size_t i = 0; i < players.size(); ++i) {
@@ -2188,4 +1884,11 @@ bool restartGame(std::vector<Player>& players, std::vector<Card>& deck, bool& ga
     gameStarted = false;
 
     return true;
+}
+
+void gameStart()
+{
+    game.isStarted = true;
+    game.turn = 1;
+    game.round = 1;
 }

@@ -7,12 +7,13 @@
 
 #define PLOG(MSG)  pLogStream.str(""); pLogStream.clear(); pLogStream << MSG
 #define PLOG_ERR(MSG)  pLogStream_err.str(""); pLogStream_err.clear(); pLogStream_err
-#define PLOG_FLUSH(TAG, TURN)  pLog(TAG,TURN, pLogStream.str());
-#define PLOG_ERR_FLUSH(TAG, TURN)  pLog(TAG,TURN, pLogStream_err.str());
+#define PLOG_FLUSH(TAG, TURN, ROUND)  pLog(TAG,TURN,ROUND, pLogStream.str());
+#define PLOG_ERR_FLUSH(TAG, TURN, ROUND)  pLog(TAG,TURN,ROUND,  pLogStream_err.str());
 
 
 struct Progression {
     int turn;
+    int round;
     std::string action;
 };
 
@@ -22,9 +23,9 @@ std::ostringstream pLogStream;
 std::ostringstream pLogStream_err;
 
 // playerProgression[d.name].push_back({ turn, std::format("Place {} Card. Used:{}/{} - OnBoard:{}", quantity, cardsInDeck - d.cards, d.cards, d.inGameCards) });
-void pLog(const std::string& tag, int turn, const std::string& message )
+void pLog(const std::string& tag, int turn, int round, const std::string& message )
 {
-    playerProgression[tag].push_back({ turn, message });
+    playerProgression[tag].push_back({ turn+((round-1)*4),round, message });
 }
 
 void renderPlayerProgressionPanelByTurn(int numPlayers)
@@ -60,18 +61,15 @@ void renderPlayerProgressionPanelByTurn(int numPlayers)
             for (const auto& log : progressionLog) {
                 if (log.turn == turn) {
                     if (!printed) {
-                        int currentRound = turn / numPlayers;
+                       // int currentRound = turn / numPlayers;
 
                         // Retrieve the color for the Daimyo
                         ImVec4 color = ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // Default white
-                       /* if (daimyoColors.find(playerName) != daimyoColors.end()) {
-                            color = daimyoColors.at(playerName);
-                        }*/
-
+     
                         // Display the player's turn with the colored name or flag
                         ImGui::TextColored(color, ICON_FA_FLAG); // Colored flag icon
                         ImGui::SameLine();
-                        ImGui::TextColored(color, "%s's Turn %d - Round %d", playerName.c_str(), turn, currentRound + 1);
+                        ImGui::TextColored(color, "Turn %d ", turn);
                         printed = true;
                     }
                     ImGui::BulletText("%s", log.action.c_str());

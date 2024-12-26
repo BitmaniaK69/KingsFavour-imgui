@@ -246,6 +246,7 @@ struct Game {
     bool collectPureHand = false;
     bool collectWinBetray = false;
     bool collectParliament = false;
+    bool showKeepCard = false;
     int initialCoins = 1;
 
     // Funzione per resettare lo stato del gioco

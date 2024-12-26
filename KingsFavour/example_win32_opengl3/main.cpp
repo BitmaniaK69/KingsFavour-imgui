@@ -366,8 +366,8 @@ int main() {
             ImGui::Checkbox("Collect if betrays", &game.collectWinBetray);
             ImGui::Checkbox("Collect max 3", &game.collectGap);
             ImGui::Checkbox("Collect when Parliament", &game.collectParliament);
-            
-
+            ImGui::Checkbox("Show Keep Card", &game.showKeepCard);
+         
             if (ImGui::Button("Restore"))
             {
                 game.restore();
@@ -1120,7 +1120,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
         ImGui::Separator();
 
         ImGui::Text("Swap Card:");
-        if (isCurrentPlayer && player.swappedThisTurn) {
+        if (isCurrentPlayer && (player.swappedThisTurn || game.showKeepCard)) {
             ImGui::PushStyleColor(ImGuiCol_Button, getSuitColor(player.swapCard.suit));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, getSuitColor(player.swapCard.suit));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, getSuitColor(player.swapCard.suit));
@@ -1135,7 +1135,7 @@ bool renderPlayerPanel(Player& player, playedCardsType& playedCards, const std::
         }
         // Show player's swap card
         std::string hiddenText = "Hidden Card";
-        if (isCurrentPlayer && player.swappedThisTurn)
+        if (isCurrentPlayer && (player.swappedThisTurn || game.showKeepCard))
         {
             hiddenText = std::format("Play {} {}\nof {}\n({}{})",
                 player.swapCard.value,
